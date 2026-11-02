@@ -58,6 +58,7 @@ let pendingGlobeMode = 'globe-standard';
 let globeCanvasOverlay = null;
 let globeCanvasOverlayFrame = 0;
 let globeCanvasOverlayLines = [];
+const mapboxTerrainExaggeration = 1.5;
 
 function resetCamera() {
   if (viewMode.startsWith('globe')) {
@@ -691,18 +692,21 @@ function drawGlobeCanvasOverlay() {
 
   const zoom = globeMap.getZoom();
   const scale = Math.max(0, Math.min(1, (zoom - 4) / 10));
+  const densityScale = globeCanvasOverlayLines.length > 5000 ? 0.55 : globeCanvasOverlayLines.length > 1000 ? 0.75 : 1;
+  const zoomScale = 1 + scale * 0.6;
   context.lineCap = 'round';
   context.lineJoin = 'round';
   context.strokeStyle = '#030303';
-  context.lineWidth = 11 + scale * 8;
-  context.globalAlpha = 0.98;
+  context.lineWidth = 5.5 * densityScale * zoomScale;
+  context.globalAlpha = 0.88;
   context.stroke(path);
   context.strokeStyle = '#ffe600';
-  context.lineWidth = 7 + scale * 6;
-  context.globalAlpha = 1;
+  context.lineWidth = 3.2 * densityScale * zoomScale;
+  context.globalAlpha = 0.96;
   context.stroke(path);
   context.strokeStyle = '#ff20d6';
-  context.lineWidth = 3 + scale * 4;
+  context.lineWidth = 1.4 * densityScale * zoomScale;
+  context.globalAlpha = 1;
   context.stroke(path);
 }
 
@@ -749,8 +753,8 @@ function addGlobeMapLayers() {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#050505',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 10, 10, 15, 15, 21],
-        'line-opacity': 0.96,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 10, 4.5, 15, 6],
+        'line-opacity': 0.86,
       },
     },
     {
@@ -761,8 +765,8 @@ function addGlobeMapLayers() {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#ffe600',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 7, 10, 11, 15, 16],
-        'line-opacity': 1,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.8, 10, 2.7, 15, 3.5],
+        'line-opacity': 0.94,
       },
     },
     {
@@ -773,7 +777,7 @@ function addGlobeMapLayers() {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#ff20d6',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 10, 5, 15, 8],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.8, 10, 1.2, 15, 1.8],
         'line-opacity': 1,
       },
     },
@@ -834,7 +838,9 @@ function applyGlobeMode(mode, refit = true) {
   if (!globeMapReady || !globeMap) return;
   const mode3d = mode === 'globe-3d';
   globeMap.setProjection('globe');
-  globeMap.setTerrain(mode3d ? { source: 'terrain-dem', exaggeration: 1.15 } : null);
+  globeMap.setTerrain(mode3d && globeMap.getSource('terrain-dem')
+    ? { source: 'terrain-dem', exaggeration: mapboxTerrainExaggeration }
+    : null);
   if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
   for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
