@@ -1,6 +1,11 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  worker: {
+    // Mapbox GL's ESM worker is code-split, so Vite must emit an ES module
+    // worker. The default IIFE format cannot contain multiple chunks.
+    format: 'es',
+  },
   server: {
     proxy: {
       '/nodeodm': {
