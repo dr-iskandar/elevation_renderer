@@ -100,14 +100,9 @@ npm run preview
 
 Output production berada di folder `dist`.
 
-## Data Rinjani yang disertakan
+## Data contoh
 
-Folder `samples` berisi:
-
-- `dem_rinjani_srtm.tif` — DEM satu band, 809 × 674, elevasi 0–3.683 meter.
-- `texture_rinjani_sentinel2.tif` — texture RGB, 809 × 674.
-
-Kedua GeoTIFF memakai EPSG:4326 serta grid dan extent yang sama. Upload file DEM ke **Heightmap DEM**, lalu texture ke **Texture permukaan**.
+Raster contoh tidak disimpan di Git agar repository tetap ringan. Gunakan pasangan DEM/DTM dan orthophoto sendiri dengan CRS serta extent yang sama. File yang sebelumnya disertakan memakai EPSG:4326; upload DEM ke **Heightmap DEM**, lalu orthophoto ke **Texture permukaan**.
 
 ## Terrain inspection
 
