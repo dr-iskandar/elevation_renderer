@@ -24,7 +24,7 @@ button, input { font: inherit; }
 .compass-dial .west { top: 50%; left: 3px; transform: translateY(-50%); }
 .compass-dial i { position: absolute; top: 12px; left: 50%; width: 0; height: 0; transform: translateX(-50%); border-right: 4px solid transparent; border-bottom: 15px solid #fb7185; border-left: 4px solid transparent; }
 .view-switch { display: flex; padding: 3px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; background: rgba(7,16,24,.7); backdrop-filter: blur(12px); }
-.view-switch button { min-width: 42px; border: 0; border-radius: 8px; padding: 7px 10px; color: #8ea3ad; background: transparent; cursor: pointer; }
+.view-switch button { min-width: 48px; border: 0; border-radius: 8px; padding: 7px 9px; color: #8ea3ad; background: transparent; font-size: 10px; cursor: pointer; }
 .view-switch button.active { color: #062018; background: #6ee7b7; font-weight: 700; }
 .ghost-button {
   border: 1px solid rgba(255,255,255,.16); color: #e8f3f0; background: rgba(7,16,24,.62);
