@@ -5,6 +5,17 @@
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #071018; }
 button, input { font: inherit; }
 #viewer { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#globeMap { position: fixed; inset: 0; display: none; background: #071018; }
+body.globe-active #globeMap { display: block; }
+body.globe-active #viewer { visibility: hidden; }
+.globe-status { position: fixed; z-index: 4; right: 25px; bottom: 24px; padding: 9px 12px; border: 1px solid rgba(125,211,252,.28); border-radius: 9px; color: #dbeafe; background: rgba(7,16,24,.82); box-shadow: 0 8px 30px rgba(0,0,0,.3); font-size: 10px; backdrop-filter: blur(12px); }
+.maplibregl-map { font-family: 'DM Sans', system-ui, sans-serif; }
+.maplibregl-ctrl-bottom-left { left: 345px; }
+.maplibregl-ctrl-attrib { color: #8ea3ad; background: rgba(7,16,24,.72) !important; }
+.maplibregl-ctrl-attrib a { color: #bfdbfe; }
+.maplibregl-ctrl-group { overflow: hidden; border: 1px solid rgba(255,255,255,.15); border-radius: 10px !important; background: rgba(7,16,24,.74) !important; box-shadow: 0 8px 28px rgba(0,0,0,.28) !important; backdrop-filter: blur(10px); }
+.maplibregl-ctrl-group button + button { border-top-color: rgba(255,255,255,.12); }
+.maplibregl-ctrl button .maplibregl-ctrl-icon { filter: invert(1); opacity: .8; }
 
 .topbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 2;
