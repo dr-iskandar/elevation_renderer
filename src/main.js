@@ -14,7 +14,13 @@ import {
   rasterGroundMetrics,
   sameSpatialReference,
 } from './spatial-reference.js';
-import { listZipEntries, mapGeometryCoordinates, mergeFeatureCollections, validateShapefileEntries } from './shapefile-utils.js';
+import {
+  featureCollectionToBoundaryLines,
+  listZipEntries,
+  mapGeometryCoordinates,
+  mergeFeatureCollections,
+  validateShapefileEntries,
+} from './shapefile-utils.js';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import './style.css';
 
@@ -611,8 +617,26 @@ function globeLocationData() {
   };
 }
 
+function ensureGlobeBoundaryStripeImage() {
+  const imageId = 'estate-boundary-stripe';
+  if (!globeMap || globeMap.hasImage(imageId)) return imageId;
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 16;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#050505';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#ffe600';
+  context.fillRect(0, 3, canvas.width, 10);
+  context.fillStyle = '#ff20d6';
+  context.fillRect(0, 6, canvas.width, 4);
+  globeMap.addImage(imageId, context.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: 2 });
+  return imageId;
+}
+
 function addGlobeMapLayers() {
   if (!globeMap?.isStyleLoaded()) return false;
+  const boundaryData = featureCollectionToBoundaryLines(shapefileWgs84Collection || emptyFeatureCollection());
   if (!globeMap.getSource('estate-shapefile')) {
     globeMap.addSource('estate-shapefile', {
       type: 'geojson',
@@ -620,8 +644,15 @@ function addGlobeMapLayers() {
       generateId: true,
     });
   }
+  if (!globeMap.getSource('estate-boundary-lines')) {
+    globeMap.addSource('estate-boundary-lines', {
+      type: 'geojson',
+      data: boundaryData,
+      generateId: true,
+    });
+  }
+  const stripeImage = ensureGlobeBoundaryStripeImage();
 
-  const boundaryFilter = ['match', ['geometry-type'], ['LineString', 'Polygon'], true, false];
   const polygonFilter = ['==', ['geometry-type'], 'Polygon'];
   const layers = [
     {
@@ -638,9 +669,8 @@ function addGlobeMapLayers() {
     {
       id: 'estate-line-halo',
       type: 'line',
-      source: 'estate-shapefile',
+      source: 'estate-boundary-lines',
       slot: 'top',
-      filter: boundaryFilter,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#050505',
@@ -651,9 +681,8 @@ function addGlobeMapLayers() {
     {
       id: 'estate-line-casing',
       type: 'line',
-      source: 'estate-shapefile',
+      source: 'estate-boundary-lines',
       slot: 'top',
-      filter: boundaryFilter,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#ffe600',
@@ -664,9 +693,8 @@ function addGlobeMapLayers() {
     {
       id: 'estate-lines',
       type: 'line',
-      source: 'estate-shapefile',
+      source: 'estate-boundary-lines',
       slot: 'top',
-      filter: boundaryFilter,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#ff20d6',
@@ -674,22 +702,41 @@ function addGlobeMapLayers() {
         'line-opacity': 1,
       },
     },
+    {
+      id: 'estate-lines-symbol-overlay',
+      type: 'symbol',
+      source: 'estate-boundary-lines',
+      slot: 'top',
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 8,
+        'icon-image': stripeImage,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 10, 1.15, 15, 1.45],
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-rotation-alignment': 'map',
+        'icon-pitch-alignment': 'map',
+        'icon-keep-upright': false,
+      },
+    },
   ];
 
   for (const layer of layers) if (!globeMap.getLayer(layer.id)) globeMap.addLayer(layer);
   globeMap.getSource('estate-shapefile')?.setData(shapefileWgs84Collection || emptyFeatureCollection());
+  globeMap.getSource('estate-boundary-lines')?.setData(boundaryData);
   return layers.every((layer) => Boolean(globeMap.getLayer(layer.id)));
 }
 
 function updateGlobeMapData() {
   if (!globeMapReady || !globeMap) return;
   globeMap.getSource('estate-shapefile')?.setData(shapefileWgs84Collection || emptyFeatureCollection());
+  globeMap.getSource('estate-boundary-lines')?.setData(featureCollectionToBoundaryLines(shapefileWgs84Collection || emptyFeatureCollection()));
 }
 
 function setGlobeMapLayerVisibility(visible) {
   if (!globeMapReady || !globeMap) return;
   const visibility = visible ? 'visible' : 'none';
-  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
+  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines', 'estate-lines-symbol-overlay']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', visibility);
   }
   if (visible) applyGlobeMode(pendingGlobeMode, false);
@@ -729,7 +776,7 @@ function applyGlobeMode(mode, refit = true) {
   globeMap.setProjection('globe');
   globeMap.setTerrain(mode3d ? { source: 'terrain-dem', exaggeration: 1.15 } : null);
   if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
-  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
+  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines', 'estate-lines-symbol-overlay']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
   }
   if (refit) fitGlobeToShapefile(true);
@@ -1158,10 +1205,11 @@ async function loadShapefileZip(file) {
   document.querySelector('#toggleShapefile').disabled = false;
   document.querySelector('#toggleShapefile').textContent = 'Sembunyikan layer';
   const warning = validation.incomplete.length ? ` · ${validation.incomplete.length} layer tidak lengkap dilewati` : '';
+  const globeLineCount = featureCollectionToBoundaryLines(shapefileWgs84Collection).features.length;
   const status = document.querySelector('#shapefileStatus');
   status.textContent = shapefileStandalone
-    ? `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · mode peta datar · ${wgs84Spatial.label}${warning}`
-    : `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${overlapCount} beririsan dengan DEM · ${demMeta.spatial.label}${warning}`;
+    ? `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${globeLineCount} garis Globe · ${wgs84Spatial.label}${warning}`
+    : `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${globeLineCount} garis Globe · ${overlapCount} beririsan dengan DEM · ${demMeta.spatial.label}${warning}`;
   status.classList.remove('hidden');
   setStatus('Shapefile berhasil dimuat', shapefileStandalone
     ? `${shapefileCollection.features.length} feature dirender langsung tanpa orthomosaic atau DEM.`
