@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { fromBlob } from 'geotiff';
+import * as maplibregl from 'maplibre-gl';
 import proj4 from 'proj4';
 import shp from 'shpjs';
 import { createOdmTask, getOdmTaskInfo, odmAssetUrl, odmStatus } from './odm-client.js';
@@ -14,6 +15,7 @@ import {
   sameSpatialReference,
 } from './spatial-reference.js';
 import { listZipEntries, mapGeometryCoordinates, mergeFeatureCollections, validateShapefileEntries } from './shapefile-utils.js';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import './style.css';
 
 const canvas = document.querySelector('#viewer');
@@ -44,11 +46,14 @@ fpsControls.pointerSpeed = 0.72;
 fpsControls.minPolarAngle = Math.PI * 0.08;
 fpsControls.maxPolarAngle = Math.PI * 0.92;
 let viewMode = '3d';
+let globeMap = null;
+let globeMapReady = false;
+let pendingGlobeMode = 'globe-standard';
 
 function resetCamera() {
   if (viewMode.startsWith('globe')) {
-    camera.up.set(0, 1, 0);
-    camera.position.set(0, 0, viewMode === 'globe-3d' ? 180 : 225);
+    fitGlobeToShapefile(true);
+    return;
   } else if (viewMode === '2d') {
     camera.up.set(0, 0, -1);
     camera.position.set(0, 285, 0.01);
@@ -580,6 +585,186 @@ function focusGlobeOnShapefile() {
   globeGroup.quaternion.setFromUnitVectors(location, new THREE.Vector3(0, 0, 1));
 }
 
+function setGlobeStatus(message = '', error = false) {
+  const status = document.querySelector('#globeStatus');
+  if (!message) {
+    status.classList.add('hidden');
+    return;
+  }
+  status.textContent = message;
+  status.style.borderColor = error ? 'rgba(251,113,133,.45)' : 'rgba(125,211,252,.28)';
+  status.style.color = error ? '#fecdd3' : '#dbeafe';
+  status.classList.remove('hidden');
+}
+
+function emptyFeatureCollection() {
+  return { type: 'FeatureCollection', features: [] };
+}
+
+function addGlobeMapLayers() {
+  if (!globeMap || globeMap.getSource('estate-shapefile')) return;
+  globeMap.addSource('estate-shapefile', {
+    type: 'geojson',
+    data: shapefileWgs84Collection || emptyFeatureCollection(),
+    generateId: true,
+  });
+  globeMap.addLayer({
+    id: 'estate-fill',
+    type: 'fill',
+    source: 'estate-shapefile',
+    filter: ['==', '$type', 'Polygon'],
+    paint: {
+      'fill-color': '#22d3ee',
+      'fill-opacity': 0.3,
+      'fill-outline-color': '#ecfeff',
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-extrusion',
+    type: 'fill-extrusion',
+    source: 'estate-shapefile',
+    filter: ['==', '$type', 'Polygon'],
+    layout: { visibility: 'none' },
+    paint: {
+      'fill-extrusion-color': '#22d3ee',
+      'fill-extrusion-height': 90,
+      'fill-extrusion-base': 0,
+      'fill-extrusion-opacity': 0.62,
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-lines',
+    type: 'line',
+    source: 'estate-shapefile',
+    paint: {
+      'line-color': '#ecfeff',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.2, 12, 3.5, 17, 6],
+      'line-opacity': 0.96,
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-points',
+    type: 'circle',
+    source: 'estate-shapefile',
+    filter: ['==', '$type', 'Point'],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 5, 12, 9, 17, 13],
+      'circle-color': '#fbbf24',
+      'circle-stroke-color': '#fff7d6',
+      'circle-stroke-width': 2,
+    },
+  });
+}
+
+function updateGlobeMapData() {
+  if (!globeMapReady || !globeMap) return;
+  const source = globeMap.getSource('estate-shapefile');
+  source?.setData(shapefileWgs84Collection || emptyFeatureCollection());
+}
+
+function setGlobeMapLayerVisibility(visible) {
+  if (!globeMapReady || !globeMap) return;
+  const visibility = visible ? 'visible' : 'none';
+  for (const layer of ['estate-fill', 'estate-extrusion', 'estate-lines', 'estate-points']) {
+    if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', visibility);
+  }
+  if (visible) applyGlobeMode(pendingGlobeMode, false);
+}
+
+function fitGlobeToShapefile(animated = true) {
+  if (!globeMapReady || !globeMap || !shapefileWgs84Collection?.features?.length) return;
+  const bounds = featureCollectionBounds(shapefileWgs84Collection);
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
+  const minimumSpan = 0.008;
+  const padX = Math.max(0, (minimumSpan - width) / 2);
+  const padY = Math.max(0, (minimumSpan - height) / 2);
+  const mode3d = pendingGlobeMode === 'globe-3d';
+  globeMap.fitBounds([
+    [bounds.minX - padX, bounds.minY - padY],
+    [bounds.maxX + padX, bounds.maxY + padY],
+  ], {
+    padding: { top: 120, right: 90, bottom: 80, left: innerWidth > 760 ? 370 : 70 },
+    maxZoom: mode3d ? 14.5 : 15.5,
+    pitch: mode3d ? 58 : 0,
+    bearing: mode3d ? -22 : 0,
+    duration: animated ? 1100 : 0,
+  });
+}
+
+function applyGlobeMode(mode, refit = true) {
+  pendingGlobeMode = mode;
+  if (!globeMapReady || !globeMap) return;
+  const mode3d = mode === 'globe-3d';
+  globeMap.setProjection({ type: 'globe' });
+  globeMap.setTerrain(mode3d ? { source: 'terrain-dem', exaggeration: 1.15 } : null);
+  if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
+  if (globeMap.getLayer('estate-fill')) globeMap.setLayoutProperty('estate-fill', 'visibility', shapefileVisible && !mode3d ? 'visible' : 'none');
+  if (globeMap.getLayer('estate-extrusion')) globeMap.setLayoutProperty('estate-extrusion', 'visibility', shapefileVisible && mode3d ? 'visible' : 'none');
+  for (const layer of ['estate-lines', 'estate-points']) {
+    if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
+  }
+  if (refit) fitGlobeToShapefile(true);
+  else globeMap.easeTo({ pitch: mode3d ? 58 : 0, bearing: mode3d ? -22 : 0, duration: 450 });
+}
+
+function ensureGlobeMap(mode) {
+  pendingGlobeMode = mode;
+  if (globeMap) {
+    globeMap.resize();
+    applyGlobeMode(mode, true);
+    return;
+  }
+  setGlobeStatus('Memuat satellite globe dan terrain…');
+  globeMap = new maplibregl.Map({
+    container: 'globeMap',
+    style: 'https://tiles.openfreemap.org/styles/bright',
+    center: [117, -2],
+    zoom: 3,
+    pitch: 0,
+    maxPitch: 85,
+    attributionControl: true,
+    canvasContextAttributes: { antialias: true },
+  });
+  globeMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+  globeMap.on('style.load', () => {
+    try {
+      globeMap.setProjection({ type: 'globe' });
+      if (!globeMap.getSource('satellite-imagery')) {
+        globeMap.addSource('satellite-imagery', {
+          type: 'raster',
+          tiles: ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'],
+          tileSize: 256,
+          attribution: 'Satellite imagery © EOX Sentinel-2 cloudless',
+        });
+        const firstLabel = globeMap.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
+        globeMap.addLayer({ id: 'satellite-imagery', type: 'raster', source: 'satellite-imagery' }, firstLabel);
+      }
+      if (!globeMap.getSource('terrain-dem')) {
+        globeMap.addSource('terrain-dem', { type: 'raster-dem', url: 'https://tiles.mapterhorn.com/tilejson.json' });
+        globeMap.addLayer({
+          id: 'terrain-hillshade',
+          type: 'hillshade',
+          source: 'terrain-dem',
+          layout: { visibility: 'none' },
+          paint: { 'hillshade-shadow-color': '#172554', 'hillshade-exaggeration': 0.22 },
+        });
+      }
+      addGlobeMapLayers();
+      globeMapReady = true;
+      updateGlobeMapData();
+      applyGlobeMode(pendingGlobeMode, true);
+      setGlobeStatus();
+    } catch (error) {
+      console.error(error);
+      setGlobeStatus(`Globe gagal disiapkan: ${error.message}`, true);
+    }
+  });
+  globeMap.on('error', (event) => {
+    if (!globeMapReady && event?.error) setGlobeStatus(`Basemap gagal dimuat: ${event.error.message}`, true);
+  });
+}
+
 function geometryOverlapsDem(geometry) {
   if (!demMeta || shapefileStandalone) return true;
   const bounds = geometryBounds(geometry);
@@ -910,8 +1095,7 @@ async function loadShapefileZip(file) {
   terrain.visible = !shapefileStandalone;
   base.visible = !shapefileStandalone;
   renderShapefileLayer();
-  renderGlobeShapefile('globe-standard');
-  focusGlobeOnShapefile();
+  updateGlobeMapData();
   setViewMode('globe-standard');
   refreshShapefileStats();
   document.querySelector('#shapefileActions').classList.remove('hidden');
@@ -957,6 +1141,7 @@ function clearShapefileLayer() {
   terrain.visible = true;
   base.visible = true;
   globeFeatureGroup.visible = false;
+  updateGlobeMapData();
   setViewMode(viewMode);
 }
 
@@ -2955,6 +3140,7 @@ document.querySelector('#toggleShapefile').addEventListener('click', (event) => 
   shapefileVisible = !shapefileVisible;
   shapefileGroup.visible = shapefileVisible && !firstPersonMode && !viewMode.startsWith('globe');
   globeFeatureGroup.visible = shapefileVisible && viewMode.startsWith('globe');
+  setGlobeMapLayerVisibility(shapefileVisible);
   event.currentTarget.textContent = shapefileVisible ? 'Sembunyikan layer' : 'Tampilkan layer';
 });
 document.querySelector('#clearShapefile').addEventListener('click', clearShapefileLayer);
@@ -2967,13 +3153,14 @@ document.querySelectorAll('.layer-button').forEach((button) => {
 function setViewMode(mode) {
   viewMode = mode;
   const globeMode = mode.startsWith('globe');
+  document.body.classList.toggle('globe-active', globeMode);
   document.querySelector('#view2d').classList.toggle('active', mode === '2d');
   document.querySelector('#view3d').classList.toggle('active', mode === '3d');
   document.querySelector('#globeStandard').classList.toggle('active', mode === 'globe-standard');
   document.querySelector('#globe3d').classList.toggle('active', mode === 'globe-3d');
-  globeGroup.visible = globeMode;
-  globeFeatureGroup.visible = globeMode && shapefileVisible;
-  if (globeMode) renderGlobeShapefile(mode);
+  globeGroup.visible = false;
+  globeFeatureGroup.visible = false;
+  if (globeMode) ensureGlobeMap(mode);
   terrain.visible = !globeMode && !shapefileStandalone;
   base.visible = !globeMode && !shapefileStandalone;
   shapefileBackdrop.visible = !globeMode && shapefileStandalone;
@@ -3098,6 +3285,7 @@ window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  globeMap?.resize();
 });
 
 const clock = new THREE.Clock();
