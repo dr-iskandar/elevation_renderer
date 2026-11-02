@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071018" />
+    <title>DEM 3D Viewer</title>
+  </head>
+  <body>
+    <canvas id="viewer"></canvas>
+
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">LOCAL TERRAIN LAB</p>
+        <h1>DEM 3D Viewer</h1>
+      </div>
+      <div class="top-actions">
+        <div class="view-switch" aria-label="Mode tampilan">
+          <button id="view3d" class="active" type="button">3D</button>
+          <button id="view2d" type="button">2D</button>
+        </div>
+        <button id="resetCamera" class="ghost-button" type="button">Reset camera</button>
+      </div>
+    </header>
+
+    <div id="compass" class="compass" aria-label="Arah mata angin">
+      <div id="compassDial" class="compass-dial">
+        <span class="north">N</span><span class="east">E</span><span class="south">S</span><span class="west">W</span>
+        <i></i>
+      </div>
+    </div>
+
+    <aside class="panel">
+      <section class="odm-section">
+        <div class="section-heading">
+          <h2>Orthomosaic / Mosaic</h2>
+          <span id="odmBadge">NodeODM</span>
+        </div>
+        <p class="hint">Proses foto drone menjadi orthophoto, DTM, dan DSM melalui OpenDroneMap lokal.</p>
+
+        <label class="compact-field">
+          <span>Nama survey</span>
+          <input id="odmProjectName" type="text" value="Survey Afdeling" />
+        </label>
+
+        <label class="file-field odm-file-field">
+          <span>Foto drone mentah</span>
+          <small>JPG/TIFF · pilih seluruh foto dalam satu penerbangan</small>
+          <input id="odmImages" type="file" accept="image/jpeg,image/tiff,.jpg,.jpeg,.tif,.tiff" multiple />
+        </label>
+        <p id="odmFileSummary" class="method-note">Belum ada foto dipilih.</p>
+
+        <div class="compact-grid">
+          <label class="compact-field">
+            <span>Target GSD</span>
+            <div class="input-with-unit"><input id="odmResolution" type="number" min="1" max="50" step="0.5" value="7.5" /><small>cm/px</small></div>
+          </label>
+          <label class="compact-field">
+            <span>Endpoint</span>
+            <input id="odmEndpoint" type="text" value="/nodeodm" />
+          </label>
+        </div>
+        <label class="compact-field">
+          <span>Token NodeODM <small>opsional</small></span>
+          <input id="odmToken" type="password" autocomplete="off" placeholder="Kosong untuk server lokal" />
+        </label>
+
+        <button id="startOdmTask" class="action-button" type="button" disabled>Buat orthomosaic</button>
+        <div id="odmProgress" class="progress-track determinate hidden"><span></span></div>
+        <div id="odmTaskCard" class="odm-task-card hidden">
+          <div><span>Status</span><strong id="odmTaskStatus">—</strong></div>
+          <div><span>Task ID</span><strong id="odmTaskId">—</strong></div>
+          <p id="odmTaskMessage">Menunggu proses.</p>
+        </div>
+        <div id="odmDownloads" class="download-grid hidden">
+          <a id="downloadOrthophoto" href="#" target="_blank" rel="noopener">Orthophoto TIFF</a>
+          <a id="downloadDtm" href="#" target="_blank" rel="noopener">DTM TIFF</a>
+          <a id="downloadDsm" href="#" target="_blank" rel="noopener">DSM TIFF</a>
+          <a id="downloadAll" href="#" target="_blank" rel="noopener">Semua output</a>
+        </div>
+        <p class="method-note">NodeODM berjalan di komputer/server sendiri. DTM hasil proses dapat langsung dipakai untuk Flood Risk.</p>
+      </section>
+
+      <section>
+        <h2>Data terrain</h2>
+        <p class="hint">Gunakan heightmap grayscale dan texture dengan extent serta orientasi yang sama.</p>
+
+        <label class="file-field auto-file-field">
+          <span>Satu GeoTIFF · Auto detect</span>
+          <small>Pilih ini jika hanya memiliki satu TIFF; band dan jenis datanya diperiksa otomatis</small>
+          <input id="autoTiffInput" type="file" accept=".tif,.tiff,image/tiff" />
+        </label>
+
+        <p id="autoDetectResult" class="auto-detect-result hidden"></p>
+
+        <label class="file-field">
+          <span>Heightmap DEM</span>
+          <small>GeoTIFF/BigTIFF; raster besar dibaca sebagai grid kerja adaptif</small>
+          <input id="heightInput" type="file" accept=".tif,.tiff,image/tiff,image/png,image/jpeg,image/webp" />
+        </label>
+
+        <label class="file-field">
+          <span>Texture permukaan</span>
+          <small>GeoTIFF RGB/BigTIFF, orthophoto, citra satelit, atau peta</small>
+          <input id="textureInput" type="file" accept=".tif,.tiff,image/tiff,image/png,image/jpeg,image/webp" />
+        </label>
+
+        <div id="rasterLoadInfo" class="raster-load-info hidden">
+          <div id="demRasterInfo" class="hidden"></div>
+          <div id="textureRasterInfo" class="hidden"></div>
+          <p>TIFF besar dibaca bertahap. Browser hanya menyimpan grid/texture preview, bukan seluruh file mentah.</p>
+        </div>
+        <p id="crsStatus" class="quality-notice hidden"></p>
+        <p id="noDataStatus" class="quality-notice hidden"></p>
+      </section>
+
+      <section id="shapefileSection" class="disabled-section">
+        <div class="section-heading">
+          <h2>Layer kebun</h2>
+          <span id="shapefileBadge">Butuh DEM</span>
+        </div>
+        <p class="hint">Upload satu ZIP berisi .shp, .shx, .dbf, dan .prj. Batas blok, jalan, kanal, serta titik aset akan diselaraskan ke CRS DEM.</p>
+        <label class="file-field">
+          <span>Import Shapefile ZIP</span>
+          <small>Empat file wajib memakai nama dasar yang sama</small>
+          <input id="shapefileInput" type="file" accept=".zip,application/zip" disabled />
+        </label>
+        <p id="shapefileStatus" class="quality-notice hidden"></p>
+        <div id="shapefileActions" class="button-row hidden">
+          <button id="toggleShapefile" class="action-button" type="button">Sembunyikan layer</button>
+          <button id="clearShapefile" class="action-button secondary-action" type="button">Hapus</button>
+          <button id="exportShapefile" class="action-button" type="button">Export GeoJSON</button>
+        </div>
+        <div id="shapefileSummary" class="shapefile-summary hidden"></div>
+        <div id="shapefileFeatureList" class="shapefile-feature-list hidden"></div>
+      </section>
+
+      <section id="layerSection" class="layer-section disabled-section">
+        <div class="section-heading">
+          <h2>Layer analisis</h2>
+          <span id="layerBadge">Butuh DEM</span>
+        </div>
+        <div class="layer-grid">
+          <button class="layer-button active" data-layer="texture" type="button">Texture</button>
+          <button class="layer-button" data-layer="elevation" type="button">Elevation</button>
+          <button class="layer-button" data-layer="hillshade" type="button">Hillshade</button>
+          <button class="layer-button" data-layer="slope" type="button">Slope</button>
+          <button class="layer-button" data-layer="suitability" type="button">Slope suitability</button>
+          <button class="layer-button" data-layer="contour" type="button">Contour</button>
+          <button class="layer-button hydro-layer" data-layer="flow" type="button" disabled>Waterways</button>
+          <button class="layer-button hydro-layer" data-layer="depression" type="button" disabled>Depression</button>
+          <button class="layer-button hydro-layer" data-layer="risk" type="button" disabled>Flood risk</button>
+        </div>
+        <div id="legend" class="legend hidden">
+          <div id="legendGradient" class="legend-gradient"></div>
+          <div class="legend-labels"><span id="legendMin">0</span><span id="legendTitle">Elevation</span><span id="legendMax">0</span></div>
+        </div>
+      </section>
+
+      <section id="suitabilitySection" class="disabled-section">
+        <div class="section-heading">
+          <h2>Slope suitability</h2>
+          <span id="suitabilityBadge">Butuh DEM</span>
+        </div>
+        <p class="hint">Kelas awal untuk screening kebun. Ambang dapat disesuaikan dengan SOP agronomi dan mekanisasi Anda.</p>
+        <div id="suitabilityStats" class="class-stats"></div>
+        <button id="exportSuitability" class="action-button" type="button" disabled>Export ringkasan slope (CSV)</button>
+      </section>
+
+      <section id="hydrologySection" class="hydrology-section disabled-section">
+        <div class="section-heading">
+          <h2>Analisis hidrologi</h2>
+          <span id="hydrologyBadge">Belum dihitung</span>
+        </div>
+        <p class="hint">Sink filling dan aliran D8 dihitung lokal dari DTM. Gunakan DTM bare-earth untuk hasil lapangan.</p>
+
+        <label class="range-field">
+          <span>Ambang jalur air <output id="streamValue">2.0 ha</output></span>
+          <input id="streamThreshold" type="range" min="0.2" max="20" value="2" step="0.2" />
+        </label>
+
+        <label class="range-field">
+          <span>Kedalaman kritis <output id="depthValue">0.50 m</output></span>
+          <input id="criticalDepth" type="range" min="0.1" max="3" value="0.5" step="0.1" />
+        </label>
+
+        <details class="risk-settings">
+          <summary>Bobot Flood Risk</summary>
+          <label class="range-field">
+            <span>Flow accumulation <output id="riskFlowValue">45</output></span>
+            <input id="riskFlowWeight" type="range" min="0" max="100" value="45" step="1" />
+          </label>
+          <label class="range-field">
+            <span>Depression depth <output id="riskDepthValue">42</output></span>
+            <input id="riskDepthWeight" type="range" min="0" max="100" value="42" step="1" />
+          </label>
+          <label class="range-field">
+            <span>Flat terrain <output id="riskFlatValue">13</output></span>
+            <input id="riskFlatWeight" type="range" min="0" max="100" value="13" step="1" />
+          </label>
+          <p class="method-note">Bobot dinormalisasi otomatis menjadi 100%.</p>
+        </details>
+
+        <button id="runHydrology" class="action-button" type="button">Buat peta Flood Risk</button>
+        <div id="hydrologyProgress" class="progress-track hidden"><span></span></div>
+
+        <div id="hydrologyStats" class="hydrology-stats hidden">
+          <div><span>Area cekungan</span><strong id="depressionArea">—</strong></div>
+          <div><span>Max depth</span><strong id="maxDepth">—</strong></div>
+          <div><span>Area high risk</span><strong id="highRiskArea">—</strong></div>
+          <div><span>Max accumulation</span><strong id="maxAccumulation">—</strong></div>
+        </div>
+        <div id="floodClassStats" class="class-stats hidden"></div>
+        <div class="button-row">
+          <button id="exportWaterways" class="action-button" type="button" disabled>Export waterways</button>
+          <button id="exportFlood" class="action-button" type="button" disabled>Export flood CSV</button>
+        </div>
+        <p class="method-note">Terrain-based Flood Risk adalah screening topografi, bukan tinggi/genangan hasil simulasi hujan hidrodinamik.</p>
+      </section>
+
+      <section class="settings">
+        <h2>Pengaturan</h2>
+
+        <label class="range-field">
+          <span>Vertical exaggeration <output id="heightValue">30</output></span>
+          <input id="heightScale" type="range" min="0" max="100" value="30" step="1" />
+        </label>
+
+        <label class="range-field">
+          <span>Brightness <output id="brightnessValue">1.00</output></span>
+          <input id="brightness" type="range" min="0.3" max="2" value="1" step="0.05" />
+        </label>
+
+        <label class="toggle-field">
+          <span>Balik tinggi DEM</span>
+          <input id="invertHeight" type="checkbox" />
+        </label>
+
+        <label class="toggle-field">
+          <span>Balik texture vertikal</span>
+          <input id="flipTexture" type="checkbox" />
+        </label>
+
+        <label class="toggle-field">
+          <span>Wireframe</span>
+          <input id="wireframe" type="checkbox" />
+        </label>
+
+        <button id="profileMode" class="action-button" type="button" disabled>Gambar elevation profile</button>
+      </section>
+
+      <section id="measurementSection" class="disabled-section">
+        <div class="section-heading">
+          <h2>Survey blok kebun</h2>
+          <span id="measurementBadge">Butuh DEM</span>
+        </div>
+        <p class="hint">Tap titik-titik batas blok. Panjang sisi, perimeter, dan luas berubah secara langsung.</p>
+        <button id="measureArea" class="action-button" type="button" disabled>Ukur area</button>
+        <div id="measurementActions" class="button-row hidden">
+          <button id="clearMeasurement" class="action-button secondary-action" type="button">Hapus</button>
+          <button id="exportMeasurement" class="action-button" type="button" disabled>Export GeoJSON</button>
+        </div>
+        <div id="measurementStats" class="block-stats hidden">
+          <div><span>Luas</span><strong id="measureAreaValue">—</strong></div>
+          <div><span>Perimeter</span><strong id="measurePerimeterValue">—</strong></div>
+          <div><span>Elevasi</span><strong id="measureElevationValue">—</strong></div>
+          <div><span>Avg slope</span><strong id="measureSlopeValue">—</strong></div>
+          <div><span>Slope S1+S2</span><strong id="measureSuitableValue">—</strong></div>
+          <div><span>High flood</span><strong id="measureFloodValue">Run hydro</strong></div>
+        </div>
+      </section>
+
+      <section class="inspection-card">
+        <div class="section-heading">
+          <h2>Inspeksi titik</h2>
+          <span>Klik terrain</span>
+        </div>
+        <dl>
+          <div><dt id="inspectXLabel">Longitude</dt><dd id="inspectLon">—</dd></div>
+          <div><dt id="inspectYLabel">Latitude</dt><dd id="inspectLat">—</dd></div>
+          <div><dt>Elevasi</dt><dd id="inspectElevation">—</dd></div>
+          <div><dt>Slope</dt><dd id="inspectSlope">—</dd></div>
+          <div><dt>Suitability</dt><dd id="inspectSuitability">—</dd></div>
+          <div><dt>Upstream area</dt><dd id="inspectAccumulation">—</dd></div>
+          <div><dt>Fill depth</dt><dd id="inspectDepth">—</dd></div>
+          <div><dt>Flood risk</dt><dd id="inspectRisk">—</dd></div>
+          <div class="inspection-wide"><dt>Risk drivers</dt><dd id="inspectRiskDrivers">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="status-card">
+        <span id="statusDot" class="status-dot"></span>
+        <div>
+          <strong id="statusTitle">Demo terrain aktif</strong>
+          <p id="statusText">Upload heightmap dan texture Anda.</p>
+        </div>
+      </section>
+    </aside>
+
+    <section id="profilePanel" class="profile-panel hidden">
+      <div class="profile-header">
+        <div><p class="eyebrow">TERRAIN SECTION</p><h2>Elevation profile</h2></div>
+        <div class="profile-summary"><span id="profileDistance">0 m</span><span id="profileRange">0–0 m</span></div>
+        <button id="closeProfile" class="icon-button" type="button" aria-label="Tutup">×</button>
+      </div>
+      <canvas id="profileChart"></canvas>
+      <p class="profile-hint">Klik dua titik pada terrain untuk membuat penampang elevasi.</p>
+    </section>
+
+    <div id="poiPopup" class="poi-popup hidden">
+      <button id="closePoi" class="poi-close" type="button">×</button>
+      <p class="eyebrow">POINT OF INTEREST</p>
+      <strong id="poiElevation">—</strong>
+      <span id="poiDetails">—</span>
+      <button id="enterFirstPerson" class="action-button" type="button">View in person</button>
+    </div>
+
+    <div id="firstPersonUi" class="first-person-ui hidden">
+      <button id="exitFirstPerson" class="exit-person-button" type="button">Exit person view</button>
+      <div id="fpsStartPrompt" class="fps-start-prompt">
+        <button id="lockFirstPerson" type="button">Click to explore</button>
+        <span>Mouse look · WASD move · Shift run · Esc release mouse</span>
+      </div>
+      <div class="crosshair"><span></span><span></span></div>
+      <div class="fps-readout">
+        <span id="fpsElevation">— m</span>
+        <span id="fpsSlope">—°</span>
+        <span id="fpsHeading">—</span>
+      </div>
+      <div class="mini-map-wrap">
+        <div class="mini-map-title"><span>POSITION</span><strong>N</strong></div>
+        <canvas id="miniMap" width="220" height="170"></canvas>
+      </div>
+      <div class="fps-controls">WASD move · Mouse/swipe look · Shift run</div>
+    </div>
+
+    <div id="sceneFade" class="scene-fade"></div>
+    <svg id="measurementOverlay" class="measurement-overlay" aria-hidden="true"></svg>
+
+    <div class="help">Drag: rotate · Scroll: zoom · Right drag: pan</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
