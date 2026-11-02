@@ -46,7 +46,10 @@ fpsControls.maxPolarAngle = Math.PI * 0.92;
 let viewMode = '3d';
 
 function resetCamera() {
-  if (viewMode === '2d') {
+  if (viewMode.startsWith('globe')) {
+    camera.up.set(0, 1, 0);
+    camera.position.set(0, 0, viewMode === 'globe-3d' ? 180 : 225);
+  } else if (viewMode === '2d') {
     camera.up.set(0, 0, -1);
     camera.position.set(0, 285, 0.01);
   } else {
@@ -54,7 +57,9 @@ function resetCamera() {
     camera.position.set(135, 115, 145);
   }
   controls.target.set(0, 0, 0);
-  controls.enableRotate = viewMode === '3d';
+  controls.enableRotate = viewMode !== '2d';
+  controls.enablePan = !viewMode.startsWith('globe');
+  controls.minDistance = viewMode.startsWith('globe') ? 82 : 45;
   controls.update();
 }
 resetCamera();
@@ -160,6 +165,41 @@ const terrain = new THREE.Mesh(geometry, material);
 terrain.castShadow = true;
 terrain.receiveShadow = true;
 scene.add(terrain);
+
+const globeRadius = 70;
+const globeGroup = new THREE.Group();
+globeGroup.name = 'wgs84-globe';
+globeGroup.visible = false;
+scene.add(globeGroup);
+
+const globeEarth = new THREE.Mesh(
+  new THREE.SphereGeometry(globeRadius, 96, 64),
+  new THREE.MeshStandardMaterial({ color: 0x123b56, roughness: 0.86, metalness: 0.04 })
+);
+globeEarth.castShadow = true;
+globeEarth.receiveShadow = true;
+globeGroup.add(globeEarth);
+
+const globeAtmosphere = new THREE.Mesh(
+  new THREE.SphereGeometry(globeRadius * 1.025, 64, 48),
+  new THREE.MeshBasicMaterial({
+    color: 0x60a5fa,
+    transparent: true,
+    opacity: 0.08,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+  })
+);
+globeGroup.add(globeAtmosphere);
+
+const globeGraticule = new THREE.Group();
+globeGraticule.name = 'globe-graticule';
+globeGroup.add(globeGraticule);
+
+const globeFeatureGroup = new THREE.Group();
+globeFeatureGroup.name = 'globe-shapefile-layer';
+globeGroup.add(globeFeatureGroup);
+buildGlobeGraticule();
 
 const shapefileBackdrop = new THREE.Mesh(
   new THREE.PlaneGeometry(212, 152),
@@ -389,6 +429,155 @@ function geometryBounds(geometry, result = { minX: Infinity, minY: Infinity, max
   };
   visit(geometry.coordinates);
   return result;
+}
+
+function lonLatToGlobe(longitude, latitude, radius = globeRadius) {
+  const lat = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(latitude, -90, 90));
+  const lon = THREE.MathUtils.degToRad(longitude);
+  const cosLat = Math.cos(lat);
+  return new THREE.Vector3(
+    radius * cosLat * Math.sin(lon),
+    radius * Math.sin(lat),
+    radius * cosLat * Math.cos(lon),
+  );
+}
+
+function buildGlobeGraticule() {
+  const material = new THREE.LineBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.18 });
+  for (let latitude = -60; latitude <= 60; latitude += 30) {
+    const points = [];
+    for (let longitude = -180; longitude <= 180; longitude += 3) points.push(lonLatToGlobe(longitude, latitude, globeRadius * 1.002));
+    globeGraticule.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material));
+  }
+  for (let longitude = -150; longitude <= 180; longitude += 30) {
+    const points = [];
+    for (let latitude = -90; latitude <= 90; latitude += 3) points.push(lonLatToGlobe(longitude, latitude, globeRadius * 1.002));
+    globeGraticule.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material));
+  }
+}
+
+function cleanGlobeRing(ring) {
+  if (!ring?.length) return [];
+  const result = ring.filter((coordinate) => Number.isFinite(coordinate?.[0]) && Number.isFinite(coordinate?.[1]));
+  if (result.length > 2) {
+    const first = result[0];
+    const last = result.at(-1);
+    if (first[0] === last[0] && first[1] === last[1]) result.pop();
+  }
+  return result;
+}
+
+function addGlobeLine(coordinates, material, radius, close = false) {
+  const clean = cleanGlobeRing(coordinates);
+  if (clean.length < 2) return;
+  const maximumPoints = 16000;
+  const stride = Math.max(1, Math.ceil(clean.length / maximumPoints));
+  const sampled = clean.filter((_, index) => index % stride === 0);
+  if (sampled.at(-1) !== clean.at(-1)) sampled.push(clean.at(-1));
+  if (close) sampled.push(sampled[0]);
+  const points = sampled.map(([longitude, latitude]) => lonLatToGlobe(longitude, latitude, radius));
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material.clone());
+  line.renderOrder = 8;
+  globeFeatureGroup.add(line);
+}
+
+function globePolygonMesh(polygon, materials, extruded) {
+  const rings = polygon.map(cleanGlobeRing).filter((ring) => ring.length >= 3);
+  if (!rings.length) return;
+  const contour = rings[0].map(([x, y]) => new THREE.Vector2(x, y));
+  const holes = rings.slice(1).map((ring) => ring.map(([x, y]) => new THREE.Vector2(x, y)));
+  const faces = THREE.ShapeUtils.triangulateShape(contour, holes);
+  const coordinates = [contour, ...holes].flat().map(({ x, y }) => [x, y]);
+  const topRadius = globeRadius + (extruded ? 4.2 : 0.55);
+  const positions = [];
+  for (const face of faces) {
+    for (const index of face) {
+      const [longitude, latitude] = coordinates[index];
+      const point = lonLatToGlobe(longitude, latitude, topRadius);
+      positions.push(point.x, point.y, point.z);
+    }
+  }
+  if (positions.length) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, materials.fill.clone());
+    mesh.renderOrder = 5;
+    globeFeatureGroup.add(mesh);
+  }
+  if (extruded) {
+    const wallPositions = [];
+    for (const ring of rings) {
+      for (let index = 0; index < ring.length; index++) {
+        const next = (index + 1) % ring.length;
+        const baseA = lonLatToGlobe(ring[index][0], ring[index][1], globeRadius + 0.45);
+        const baseB = lonLatToGlobe(ring[next][0], ring[next][1], globeRadius + 0.45);
+        const topA = lonLatToGlobe(ring[index][0], ring[index][1], topRadius);
+        const topB = lonLatToGlobe(ring[next][0], ring[next][1], topRadius);
+        for (const point of [baseA, baseB, topB, baseA, topB, topA]) wallPositions.push(point.x, point.y, point.z);
+      }
+    }
+    if (wallPositions.length) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(wallPositions, 3));
+      geometry.computeVertexNormals();
+      const walls = new THREE.Mesh(geometry, materials.wall.clone());
+      walls.renderOrder = 4;
+      globeFeatureGroup.add(walls);
+    }
+  }
+  for (const ring of rings) addGlobeLine(ring, materials.polygon, topRadius + 0.08, true);
+}
+
+function renderGlobeGeometry(geometry, materials, extruded) {
+  if (!geometry) return;
+  const lineRadius = globeRadius + (extruded ? 4.35 : 0.7);
+  if (geometry.type === 'Point') {
+    const marker = new THREE.Mesh(new THREE.SphereGeometry(extruded ? 1.35 : 0.9, 10, 8), materials.point.clone());
+    marker.position.copy(lonLatToGlobe(geometry.coordinates[0], geometry.coordinates[1], lineRadius + 0.6));
+    marker.renderOrder = 9;
+    globeFeatureGroup.add(marker);
+  } else if (geometry.type === 'MultiPoint') {
+    geometry.coordinates.forEach((coordinate) => renderGlobeGeometry({ type: 'Point', coordinates: coordinate }, materials, extruded));
+  } else if (geometry.type === 'LineString') {
+    addGlobeLine(geometry.coordinates, materials.line, lineRadius);
+  } else if (geometry.type === 'MultiLineString') {
+    geometry.coordinates.forEach((line) => addGlobeLine(line, materials.line, lineRadius));
+  } else if (geometry.type === 'Polygon') {
+    globePolygonMesh(geometry.coordinates, materials, extruded);
+  } else if (geometry.type === 'MultiPolygon') {
+    geometry.coordinates.forEach((polygon) => globePolygonMesh(polygon, materials, extruded));
+  } else if (geometry.type === 'GeometryCollection') {
+    geometry.geometries.forEach((item) => renderGlobeGeometry(item, materials, extruded));
+  }
+}
+
+function renderGlobeShapefile(mode = viewMode) {
+  for (const child of [...globeFeatureGroup.children]) {
+    globeFeatureGroup.remove(child);
+    disposeObject3d(child);
+  }
+  if (!shapefileWgs84Collection) return;
+  const extruded = mode === 'globe-3d';
+  const materials = {
+    polygon: new THREE.LineBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.98, depthTest: true }),
+    line: new THREE.LineBasicMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.96, depthTest: true }),
+    point: new THREE.MeshBasicMaterial({ color: 0xfbbf24 }),
+    fill: new THREE.MeshStandardMaterial({ color: 0x22d3ee, transparent: true, opacity: extruded ? 0.58 : 0.28, side: THREE.DoubleSide, depthWrite: false }),
+    wall: new THREE.MeshStandardMaterial({ color: 0x0891b2, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false }),
+  };
+  for (const feature of shapefileWgs84Collection.features) renderGlobeGeometry(feature.geometry, materials, extruded);
+  Object.values(materials).forEach((item) => item.dispose());
+  globeFeatureGroup.visible = shapefileVisible;
+}
+
+function focusGlobeOnShapefile() {
+  if (!shapefileWgs84Collection) return;
+  const bounds = featureCollectionBounds(shapefileWgs84Collection);
+  const longitude = (bounds.minX + bounds.maxX) / 2;
+  const latitude = (bounds.minY + bounds.maxY) / 2;
+  const location = lonLatToGlobe(longitude, latitude, 1).normalize();
+  globeGroup.quaternion.setFromUnitVectors(location, new THREE.Vector3(0, 0, 1));
 }
 
 function geometryOverlapsDem(geometry) {
@@ -720,8 +909,10 @@ async function loadShapefileZip(file) {
   shapefileGrid.visible = shapefileStandalone;
   terrain.visible = !shapefileStandalone;
   base.visible = !shapefileStandalone;
-  if (shapefileStandalone) setViewMode('2d');
   renderShapefileLayer();
+  renderGlobeShapefile('globe-standard');
+  focusGlobeOnShapefile();
+  setViewMode('globe-standard');
   refreshShapefileStats();
   document.querySelector('#shapefileActions').classList.remove('hidden');
   document.querySelector('#shapefileBadge').textContent = 'Aktif';
@@ -749,6 +940,10 @@ function clearShapefileLayer() {
     shapefileGroup.remove(child);
     disposeObject3d(child);
   }
+  for (const child of [...globeFeatureGroup.children]) {
+    globeFeatureGroup.remove(child);
+    disposeObject3d(child);
+  }
   document.querySelector('#shapefileInput').value = '';
   document.querySelector('#shapefileActions').classList.add('hidden');
   document.querySelector('#shapefileSummary').classList.add('hidden');
@@ -761,6 +956,8 @@ function clearShapefileLayer() {
   shapefileGrid.visible = false;
   terrain.visible = true;
   base.visible = true;
+  globeFeatureGroup.visible = false;
+  setViewMode(viewMode);
 }
 
 function exportImportedShapefile() {
@@ -1795,6 +1992,7 @@ async function loadDemGeoTiff(file) {
     }
     status.classList.remove('hidden');
   }
+  if (viewMode.startsWith('globe')) setViewMode(viewMode);
   renderRasterLoadInfo('height', meta, file);
   const crsStatus = document.querySelector('#crsStatus');
   crsStatus.textContent = meta.spatial.assumedMetric
@@ -2057,6 +2255,7 @@ let profileLine = null;
 let pointMarker = null;
 
 function terrainHit(event) {
+  if (viewMode.startsWith('globe')) return null;
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -2213,7 +2412,7 @@ function exportMeasurementGeoJson() {
 function updateCompass() {
   const dial = document.querySelector('#compassDial');
   if (!dial || firstPersonMode) return;
-  if (viewMode === '2d') {
+  if (viewMode === '2d' || viewMode.startsWith('globe')) {
     dial.style.transform = 'rotate(0deg)';
     return;
   }
@@ -2567,13 +2766,15 @@ async function exitFirstPerson() {
   camera.up.copy(savedMapCamera.up);
   camera.position.copy(savedMapCamera.position);
   controls.target.copy(savedMapCamera.target);
-  controls.enableRotate = viewMode === '3d';
+  controls.enableRotate = viewMode !== '2d';
   controls.enabled = true;
   controls.update();
   camera.updateProjectionMatrix();
   scene.fog = viewMode === '2d' ? null : new THREE.FogExp2(0x071018, 0.0025);
   document.querySelector('#view2d').classList.toggle('active', viewMode === '2d');
   document.querySelector('#view3d').classList.toggle('active', viewMode === '3d');
+  document.querySelector('#globeStandard').classList.toggle('active', viewMode === 'globe-standard');
+  document.querySelector('#globe3d').classList.toggle('active', viewMode === 'globe-3d');
   fade.classList.remove('active');
 }
 
@@ -2752,7 +2953,8 @@ document.querySelector('#shapefileInput').addEventListener('change', async (even
 });
 document.querySelector('#toggleShapefile').addEventListener('click', (event) => {
   shapefileVisible = !shapefileVisible;
-  shapefileGroup.visible = shapefileVisible && !firstPersonMode;
+  shapefileGroup.visible = shapefileVisible && !firstPersonMode && !viewMode.startsWith('globe');
+  globeFeatureGroup.visible = shapefileVisible && viewMode.startsWith('globe');
   event.currentTarget.textContent = shapefileVisible ? 'Sembunyikan layer' : 'Tampilkan layer';
 });
 document.querySelector('#clearShapefile').addEventListener('click', clearShapefileLayer);
@@ -2764,14 +2966,27 @@ document.querySelectorAll('.layer-button').forEach((button) => {
 
 function setViewMode(mode) {
   viewMode = mode;
+  const globeMode = mode.startsWith('globe');
   document.querySelector('#view2d').classList.toggle('active', mode === '2d');
   document.querySelector('#view3d').classList.toggle('active', mode === '3d');
-  scene.fog = mode === '2d' ? null : new THREE.FogExp2(0x071018, 0.0025);
+  document.querySelector('#globeStandard').classList.toggle('active', mode === 'globe-standard');
+  document.querySelector('#globe3d').classList.toggle('active', mode === 'globe-3d');
+  globeGroup.visible = globeMode;
+  globeFeatureGroup.visible = globeMode && shapefileVisible;
+  if (globeMode) renderGlobeShapefile(mode);
+  terrain.visible = !globeMode && !shapefileStandalone;
+  base.visible = !globeMode && !shapefileStandalone;
+  shapefileBackdrop.visible = !globeMode && shapefileStandalone;
+  shapefileGrid.visible = !globeMode && shapefileStandalone;
+  shapefileGroup.visible = !globeMode && shapefileVisible && Boolean(shapefileCollection);
+  scene.fog = mode === '3d' ? new THREE.FogExp2(0x071018, 0.0025) : null;
   resetCamera();
 }
 
 document.querySelector('#view2d').addEventListener('click', () => setViewMode('2d'));
 document.querySelector('#view3d').addEventListener('click', () => setViewMode('3d'));
+document.querySelector('#globeStandard').addEventListener('click', () => setViewMode('globe-standard'));
+document.querySelector('#globe3d').addEventListener('click', () => setViewMode('globe-3d'));
 
 document.querySelector('#profileMode').addEventListener('click', (event) => {
   if (measurementMode) clearMeasurement();
