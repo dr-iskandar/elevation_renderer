@@ -49,6 +49,7 @@ let viewMode = '3d';
 let globeMap = null;
 let globeMapReady = false;
 let pendingGlobeMode = 'globe-standard';
+let globeLocationMarker = null;
 
 function resetCamera() {
   if (viewMode.startsWith('globe')) {
@@ -601,6 +602,54 @@ function emptyFeatureCollection() {
   return { type: 'FeatureCollection', features: [] };
 }
 
+function globeLocationData() {
+  if (!shapefileWgs84Collection?.features?.length) return null;
+  const bounds = featureCollectionBounds(shapefileWgs84Collection);
+  return {
+    bounds,
+    center: [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2],
+    featureCount: shapefileWgs84Collection.features.length,
+    geojson: {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: { kind: 'upload-bounds' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [bounds.minX, bounds.minY],
+            [bounds.maxX, bounds.minY],
+            [bounds.maxX, bounds.maxY],
+            [bounds.minX, bounds.maxY],
+            [bounds.minX, bounds.minY],
+          ]],
+        },
+      }],
+    },
+  };
+}
+
+function updateGlobeLocationHint() {
+  const hint = document.querySelector('#globeHint');
+  const data = globeLocationData();
+  globeLocationMarker?.remove();
+  globeLocationMarker = null;
+  if (!data) {
+    hint.classList.add('hidden');
+    return;
+  }
+  document.querySelector('#globeHintText').textContent = `${data.featureCount.toLocaleString('id-ID')} feature · ${data.center[1].toFixed(5)}, ${data.center[0].toFixed(5)}`;
+  hint.classList.remove('hidden');
+  if (!globeMapReady || !globeMap) return;
+  const markerElement = document.createElement('div');
+  markerElement.className = 'estate-location-marker';
+  markerElement.title = 'Pusat area data yang di-upload';
+  globeLocationMarker = new maplibregl.Marker({ element: markerElement, anchor: 'center' })
+    .setLngLat(data.center)
+    .setPopup(new maplibregl.Popup({ offset: 34 }).setHTML(`<strong>Area data upload</strong><br>${data.featureCount.toLocaleString('id-ID')} feature`))
+    .addTo(globeMap);
+}
+
 function addGlobeMapLayers() {
   if (!globeMap || globeMap.getSource('estate-shapefile')) return;
   globeMap.addSource('estate-shapefile', {
@@ -608,28 +657,63 @@ function addGlobeMapLayers() {
     data: shapefileWgs84Collection || emptyFeatureCollection(),
     generateId: true,
   });
+  globeMap.addSource('estate-location-bounds', {
+    type: 'geojson',
+    data: globeLocationData()?.geojson || emptyFeatureCollection(),
+  });
+  globeMap.addLayer({
+    id: 'estate-bounds-glow',
+    type: 'line',
+    source: 'estate-location-bounds',
+    paint: {
+      'line-color': '#000000',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 7, 12, 12, 17, 18],
+      'line-opacity': 0.72,
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-bounds',
+    type: 'line',
+    source: 'estate-location-bounds',
+    paint: {
+      'line-color': '#facc15',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.5, 12, 5, 17, 8],
+      'line-dasharray': [2, 1.25],
+      'line-opacity': 1,
+    },
+  });
   globeMap.addLayer({
     id: 'estate-fill',
     type: 'fill',
     source: 'estate-shapefile',
-    filter: ['==', '$type', 'Polygon'],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     paint: {
-      'fill-color': '#22d3ee',
-      'fill-opacity': 0.3,
-      'fill-outline-color': '#ecfeff',
+      'fill-color': '#ff2bd6',
+      'fill-opacity': 0.42,
+      'fill-outline-color': '#facc15',
     },
   });
   globeMap.addLayer({
     id: 'estate-extrusion',
     type: 'fill-extrusion',
     source: 'estate-shapefile',
-    filter: ['==', '$type', 'Polygon'],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     layout: { visibility: 'none' },
     paint: {
-      'fill-extrusion-color': '#22d3ee',
+      'fill-extrusion-color': '#ff2bd6',
       'fill-extrusion-height': 90,
       'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.62,
+      'fill-extrusion-opacity': 0.72,
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-line-halo',
+    type: 'line',
+    source: 'estate-shapefile',
+    paint: {
+      'line-color': '#050505',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 5, 12, 10, 17, 16],
+      'line-opacity': 0.86,
     },
   });
   globeMap.addLayer({
@@ -637,35 +721,49 @@ function addGlobeMapLayers() {
     type: 'line',
     source: 'estate-shapefile',
     paint: {
-      'line-color': '#ecfeff',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.2, 12, 3.5, 17, 6],
-      'line-opacity': 0.96,
+      'line-color': '#facc15',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.5, 12, 5, 17, 8],
+      'line-opacity': 1,
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-point-halo',
+    type: 'circle',
+    source: 'estate-shapefile',
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 10, 12, 15, 17, 20],
+      'circle-color': '#050505',
+      'circle-opacity': 0.86,
     },
   });
   globeMap.addLayer({
     id: 'estate-points',
     type: 'circle',
     source: 'estate-shapefile',
-    filter: ['==', '$type', 'Point'],
+    filter: ['==', ['geometry-type'], 'Point'],
     paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 5, 12, 9, 17, 13],
-      'circle-color': '#fbbf24',
-      'circle-stroke-color': '#fff7d6',
-      'circle-stroke-width': 2,
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 7, 12, 11, 17, 16],
+      'circle-color': '#ff2bd6',
+      'circle-stroke-color': '#facc15',
+      'circle-stroke-width': 3,
     },
   });
+  globeMap.moveLayer('estate-bounds-glow');
+  globeMap.moveLayer('estate-bounds');
 }
 
 function updateGlobeMapData() {
+  updateGlobeLocationHint();
   if (!globeMapReady || !globeMap) return;
-  const source = globeMap.getSource('estate-shapefile');
-  source?.setData(shapefileWgs84Collection || emptyFeatureCollection());
+  globeMap.getSource('estate-shapefile')?.setData(shapefileWgs84Collection || emptyFeatureCollection());
+  globeMap.getSource('estate-location-bounds')?.setData(globeLocationData()?.geojson || emptyFeatureCollection());
 }
 
 function setGlobeMapLayerVisibility(visible) {
   if (!globeMapReady || !globeMap) return;
   const visibility = visible ? 'visible' : 'none';
-  for (const layer of ['estate-fill', 'estate-extrusion', 'estate-lines', 'estate-points']) {
+  for (const layer of ['estate-bounds-glow', 'estate-bounds', 'estate-fill', 'estate-extrusion', 'estate-line-halo', 'estate-lines', 'estate-point-halo', 'estate-points']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', visibility);
   }
   if (visible) applyGlobeMode(pendingGlobeMode, false);
@@ -673,19 +771,19 @@ function setGlobeMapLayerVisibility(visible) {
 
 function fitGlobeToShapefile(animated = true) {
   if (!globeMapReady || !globeMap || !shapefileWgs84Collection?.features?.length) return;
-  const bounds = featureCollectionBounds(shapefileWgs84Collection);
+  const { bounds, center } = globeLocationData();
   const width = bounds.maxX - bounds.minX;
   const height = bounds.maxY - bounds.minY;
-  const minimumSpan = 0.008;
-  const padX = Math.max(0, (minimumSpan - width) / 2);
-  const padY = Math.max(0, (minimumSpan - height) / 2);
+  const longitudeSpan = Math.max(0.0015, width * Math.max(0.2, Math.cos(THREE.MathUtils.degToRad(center[1]))));
+  const latitudeSpan = Math.max(0.0015, height);
+  const angularSpan = Math.max(longitudeSpan, latitudeSpan);
+  const calculatedZoom = Math.log2(360 / angularSpan) - 1.7;
+  const targetZoom = THREE.MathUtils.clamp(calculatedZoom, 9.5, pendingGlobeMode === 'globe-3d' ? 14.5 : 15.5);
   const mode3d = pendingGlobeMode === 'globe-3d';
-  globeMap.fitBounds([
-    [bounds.minX - padX, bounds.minY - padY],
-    [bounds.maxX + padX, bounds.maxY + padY],
-  ], {
+  globeMap.easeTo({
+    center,
+    zoom: targetZoom,
     padding: { top: 120, right: 90, bottom: 80, left: innerWidth > 760 ? 370 : 70 },
-    maxZoom: mode3d ? 14.5 : 15.5,
     pitch: mode3d ? 58 : 0,
     bearing: mode3d ? -22 : 0,
     duration: animated ? 1100 : 0,
@@ -701,7 +799,7 @@ function applyGlobeMode(mode, refit = true) {
   if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
   if (globeMap.getLayer('estate-fill')) globeMap.setLayoutProperty('estate-fill', 'visibility', shapefileVisible && !mode3d ? 'visible' : 'none');
   if (globeMap.getLayer('estate-extrusion')) globeMap.setLayoutProperty('estate-extrusion', 'visibility', shapefileVisible && mode3d ? 'visible' : 'none');
-  for (const layer of ['estate-lines', 'estate-points']) {
+  for (const layer of ['estate-bounds-glow', 'estate-bounds', 'estate-line-halo', 'estate-lines', 'estate-point-halo', 'estate-points']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
   }
   if (refit) fitGlobeToShapefile(true);
@@ -3174,6 +3272,7 @@ document.querySelector('#view2d').addEventListener('click', () => setViewMode('2
 document.querySelector('#view3d').addEventListener('click', () => setViewMode('3d'));
 document.querySelector('#globeStandard').addEventListener('click', () => setViewMode('globe-standard'));
 document.querySelector('#globe3d').addEventListener('click', () => setViewMode('globe-3d'));
+document.querySelector('#focusGlobeArea').addEventListener('click', () => fitGlobeToShapefile(true));
 
 document.querySelector('#profileMode').addEventListener('click', (event) => {
   if (measurementMode) clearMeasurement();
