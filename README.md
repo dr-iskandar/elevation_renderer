@@ -2,7 +2,7 @@
 
 Viewer lokal untuk merender GeoTIFF/heightmap DEM sebagai terrain 3D dan menampilkan GeoTIFF RGB, orthophoto, citra satelit, atau peta sebagai texture di permukaannya.
 
-## Fokus v2.5.5
+## Fokus v2.6.0
 
 Versi ini memprioritaskan dua workflow produk:
 
@@ -15,6 +15,7 @@ Versi ini memprioritaskan dua workflow produk:
 7. **Mapbox satellite globe:** mode Globe menggunakan Mapbox Standard Satellite, atmosphere, dan auto-focus ke extent Shapefile. Globe 3D menambahkan Mapbox Terrain-DEM serta kamera pitch untuk inspeksi regional.
 8. **High-visibility boundary:** geometry jalan dan ring polygon dinormalisasi menjadi LineString khusus overlay. Garis digambar ulang oleh canvas transparan yang selalu berada di atas canvas Mapbox. Ketebalan menyesuaikan kepadatan: dataset di atas 5.000 ruas memakai skala 55% agar citra satelit tetap terbaca, sementara boundary kecil tetap lebih tegas. Tidak ada marker POI berkedip.
 9. **Mapbox terrain untuk Globe 3D:** relief diambil dari Mapbox Terrain-DEM dengan vertical exaggeration 1,5×. Shapefile tetap berfungsi sebagai overlay lokasi; elevasi 3D tidak ditebak dari atribut garis.
+10. **Kontrol style Shapefile:** slider ketebalan `0,15×–2,5×` dan color picker mengubah overlay secara live pada Globe serta Globe 3D tanpa upload ulang.
 
 ## Menjalankan NodeODM
 
