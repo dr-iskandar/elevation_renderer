@@ -2,7 +2,7 @@
 
 Viewer lokal untuk merender GeoTIFF/heightmap DEM sebagai terrain 3D dan menampilkan GeoTIFF RGB, orthophoto, citra satelit, atau peta sebagai texture di permukaannya.
 
-## Fokus v2.5.0
+## Fokus v2.5.1
 
 Versi ini memprioritaskan dua workflow produk:
 
@@ -112,6 +112,10 @@ File asli tetap berada di perangkat dan tidak diunggah. Untuk pengalaman paling 
 Preview adaptif dipakai untuk visualisasi dan analisis interaktif. Nilai pada grid kerja mewakili hasil resampling dari sumber; pekerjaan yang membutuhkan resolusi pixel asli sebaiknya diekspor/diproses melalui pipeline COG bertile pada tahap production.
 
 ## Build production
+
+Worker Mapbox dibundel sebagai ES module melalui `worker.format: 'es'` di
+`vite.config.js`. Konfigurasi ini diperlukan karena entry ESM Mapbox memakai
+code-splitting untuk worker internalnya.
 
 ```bash
 npm run build
