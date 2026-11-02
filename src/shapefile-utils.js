@@ -69,6 +69,33 @@ export function mergeFeatureCollections(value) {
   return { type: 'FeatureCollection', features };
 }
 
+export function featureCollectionToBoundaryLines(collection) {
+  const features = [];
+  const appendLine = (coordinates, properties) => {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+    features.push({
+      type: 'Feature',
+      properties: { ...(properties || {}) },
+      geometry: { type: 'LineString', coordinates },
+    });
+  };
+  const appendGeometry = (geometry, properties) => {
+    if (!geometry) return;
+    if (geometry.type === 'LineString') appendLine(geometry.coordinates, properties);
+    else if (geometry.type === 'MultiLineString' || geometry.type === 'Polygon') {
+      for (const line of geometry.coordinates || []) appendLine(line, properties);
+    } else if (geometry.type === 'MultiPolygon') {
+      for (const polygon of geometry.coordinates || []) {
+        for (const ring of polygon || []) appendLine(ring, properties);
+      }
+    } else if (geometry.type === 'GeometryCollection') {
+      for (const item of geometry.geometries || []) appendGeometry(item, properties);
+    }
+  };
+  for (const feature of collection?.features || []) appendGeometry(feature.geometry, feature.properties);
+  return { type: 'FeatureCollection', features };
+}
+
 export function mapGeometryCoordinates(geometry, transform) {
   if (!geometry) return null;
   const mapPoint = (coordinate) => {
