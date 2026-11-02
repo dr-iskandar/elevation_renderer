@@ -2,7 +2,7 @@
 
 Viewer lokal untuk merender GeoTIFF/heightmap DEM sebagai terrain 3D dan menampilkan GeoTIFF RGB, orthophoto, citra satelit, atau peta sebagai texture di permukaannya.
 
-## Fokus v2.4.0
+## Fokus v2.4.1
 
 Versi ini memprioritaskan dua workflow produk:
 
@@ -13,6 +13,7 @@ Versi ini memprioritaskan dua workflow produk:
 5. **Shapefile standalone:** paket Shapefile dapat dibuka lebih dahulu pada peta datar tanpa orthomosaic, DEM, atau DTM. Saat DEM dimuat kemudian, layer otomatis diproyeksikan dan didrape ke terrain.
 6. **Globe WGS84:** Shapefile otomatis ditempatkan pada posisi longitude/latitude sebenarnya. Mode Globe menampilkan layer di permukaan bumi, sedangkan Globe 3D memberi extrusi visual pada polygon untuk inspeksi tanpa mengklaimnya sebagai elevasi terrain.
 7. **Realistic globe basemap:** mode Globe menggunakan MapLibre GL dengan satellite imagery, label peta, atmosphere, dan auto-fit ke extent Shapefile. Globe 3D menambahkan terrain elevation serta kamera pitch untuk inspeksi regional.
+8. **High-visibility location hint:** layer upload memakai fill magenta, outline kuning, halo gelap, bounding box, dan beacon berdenyut. Panel lokasi menyediakan koordinat pusat serta tombol untuk mengembalikan kamera ke area data.
 
 ## Menjalankan NodeODM
 
