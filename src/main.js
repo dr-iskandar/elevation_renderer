@@ -114,9 +114,17 @@ let rasterLoading = false;
 let odmTaskUuid = null;
 let odmPollTimer = null;
 let shapefileCollection = null;
+let shapefileWgs84Collection = null;
 let shapefileSourceName = '';
 let shapefileFeatureStats = [];
 let shapefileVisible = true;
+let shapefileStandalone = false;
+let shapefileBounds = null;
+const wgs84Spatial = buildSpatialReference({
+  geoKeys: { GTModelTypeGeoKey: 2, GeographicTypeGeoKey: 4326 },
+  bbox: [-180, -90, 180, 90],
+  georeferenced: true,
+});
 const movementKeys = new Set();
 const fpsVelocity = new THREE.Vector3();
 const fpsForward = new THREE.Vector3();
@@ -152,6 +160,20 @@ const terrain = new THREE.Mesh(geometry, material);
 terrain.castShadow = true;
 terrain.receiveShadow = true;
 scene.add(terrain);
+
+const shapefileBackdrop = new THREE.Mesh(
+  new THREE.PlaneGeometry(212, 152),
+  new THREE.MeshBasicMaterial({ color: 0x0b1720, side: THREE.DoubleSide })
+);
+shapefileBackdrop.rotation.x = -Math.PI / 2;
+shapefileBackdrop.position.y = -0.15;
+shapefileBackdrop.visible = false;
+scene.add(shapefileBackdrop);
+
+const shapefileGrid = new THREE.GridHelper(210, 14, 0x27495a, 0x152b36);
+shapefileGrid.position.y = -0.05;
+shapefileGrid.visible = false;
+scene.add(shapefileGrid);
 
 const shapefileGroup = new THREE.Group();
 shapefileGroup.name = 'shapefile-layer';
@@ -370,6 +392,7 @@ function geometryBounds(geometry, result = { minX: Infinity, minY: Infinity, max
 }
 
 function geometryOverlapsDem(geometry) {
+  if (!demMeta || shapefileStandalone) return true;
   const bounds = geometryBounds(geometry);
   if (!Number.isFinite(bounds.minX)) return false;
   const [west, south, east, north] = demMeta.bbox;
@@ -377,6 +400,38 @@ function geometryOverlapsDem(geometry) {
     && bounds.minX <= Math.max(west, east)
     && bounds.maxY >= Math.min(south, north)
     && bounds.minY <= Math.max(south, north);
+}
+
+function featureCollectionBounds(collection) {
+  const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  for (const feature of collection?.features || []) geometryBounds(feature.geometry, bounds);
+  if (!Number.isFinite(bounds.minX)) throw new Error('Shapefile tidak memiliki koordinat geometry yang valid.');
+  if (bounds.minX === bounds.maxX) {
+    bounds.minX -= 0.0001;
+    bounds.maxX += 0.0001;
+  }
+  if (bounds.minY === bounds.maxY) {
+    bounds.minY -= 0.0001;
+    bounds.maxY += 0.0001;
+  }
+  return bounds;
+}
+
+function standaloneWorldFromCoordinate(x, y, extraHeight = 0.65) {
+  const bounds = shapefileBounds;
+  if (!bounds) return new THREE.Vector3();
+  const metrics = rasterGroundMetrics({
+    bbox: [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY],
+    spatial: wgs84Spatial,
+  }, 1, 1);
+  const availableWidth = 196;
+  const availableHeight = 136;
+  const aspect = metrics.groundWidth / Math.max(0.01, metrics.groundHeight);
+  const displayWidth = aspect > availableWidth / availableHeight ? availableWidth : availableHeight * aspect;
+  const displayHeight = aspect > availableWidth / availableHeight ? availableWidth / aspect : availableHeight;
+  const u = (x - bounds.minX) / Math.max(Number.EPSILON, bounds.maxX - bounds.minX);
+  const v = (y - bounds.minY) / Math.max(Number.EPSILON, bounds.maxY - bounds.minY);
+  return new THREE.Vector3((u - 0.5) * displayWidth, extraHeight, (0.5 - v) * displayHeight);
 }
 
 function coordinateToRaster(x, y) {
@@ -413,6 +468,7 @@ function drapedPoints(coordinates, close = false) {
     : coordinates;
   const points = [];
   const maximumPoints = 12000;
+  if (shapefileStandalone) return source.slice(0, maximumPoints).map(([x, y]) => standaloneWorldFromCoordinate(x, y));
   for (let i = 0; i < source.length - 1 && points.length < maximumPoints; i++) {
     const start = coordinateToRaster(source[i][0], source[i][1]);
     const end = coordinateToRaster(source[i + 1][0], source[i + 1][1]);
@@ -442,10 +498,14 @@ function addShapefileLine(coordinates, material, close = false) {
 function renderFeatureGeometry(geometry, materials) {
   if (!geometry) return;
   if (geometry.type === 'Point') {
-    if (!coordinateInsideDem(geometry.coordinates)) return;
-    const pixel = coordinateToRaster(geometry.coordinates[0], geometry.coordinates[1]);
+    if (!shapefileStandalone && !coordinateInsideDem(geometry.coordinates)) return;
     const marker = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 8), materials.point.clone());
-    marker.position.copy(rasterToMapWorld(pixel.x, pixel.y, 1.3));
+    if (shapefileStandalone) {
+      marker.position.copy(standaloneWorldFromCoordinate(geometry.coordinates[0], geometry.coordinates[1], 1.3));
+    } else {
+      const pixel = coordinateToRaster(geometry.coordinates[0], geometry.coordinates[1]);
+      marker.position.copy(rasterToMapWorld(pixel.x, pixel.y, 1.3));
+    }
     marker.renderOrder = 7;
     shapefileGroup.add(marker);
   } else if (geometry.type === 'MultiPoint') {
@@ -476,15 +536,13 @@ function renderShapefileLayer() {
     shapefileGroup.remove(child);
     disposeObject3d(child);
   }
-  if (!shapefileCollection || !demValues) return;
+  if (!shapefileCollection) return;
   const materials = {
     polygon: new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.96, depthTest: false }),
     line: new THREE.LineBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.95, depthTest: false }),
     point: new THREE.MeshBasicMaterial({ color: 0xfbbf24, depthTest: false }),
   };
-  for (const feature of shapefileCollection.features) {
-    if (geometryOverlapsDem(feature.geometry)) renderFeatureGeometry(feature.geometry, materials);
-  }
+  for (const feature of shapefileCollection.features) if (geometryOverlapsDem(feature.geometry)) renderFeatureGeometry(feature.geometry, materials);
   Object.values(materials).forEach((item) => item.dispose());
   shapefileGroup.visible = shapefileVisible && !firstPersonMode;
 }
@@ -506,7 +564,7 @@ function polygonContainsCoordinate(x, y, polygon) {
 
 function ringMetric(ring) {
   if (ring.length < 3) return { area: 0, perimeter: 0 };
-  const local = coordinatesToLocalMetres(ring.map(([x, y]) => ({ x, y })), demMeta.spatial);
+  const local = coordinatesToLocalMetres(ring.map(([x, y]) => ({ x, y })), shapefileStandalone ? wgs84Spatial : demMeta.spatial);
   let areaTwice = 0;
   let perimeter = 0;
   for (let i = 0; i < local.length; i++) {
@@ -541,6 +599,18 @@ function calculateShapefileFeatureStats(feature) {
       area += index === 0 ? metric.area : -metric.area;
       perimeter += metric.perimeter;
     });
+  }
+  if (shapefileStandalone || !demValues || !demMeta) {
+    return {
+      area: Math.max(0, area),
+      perimeter,
+      elevationMin: null,
+      elevationMax: null,
+      averageSlope: null,
+      highFloodPercent: null,
+    };
+  }
+  for (const polygon of polygons) {
     const outer = polygon[0];
     if (!outer?.length) continue;
     const pixels = outer.map(([x, y]) => coordinateToRaster(x, y));
@@ -601,13 +671,15 @@ function refreshShapefileStats() {
     ['Garis/jalan/kanal', counts.line],
     ['Titik aset', counts.point],
     ['Total area polygon', formatArea(polygonArea)],
-    ['CRS target', demMeta.spatial.label],
+    ['CRS tampilan', shapefileStandalone ? wgs84Spatial.label : demMeta.spatial.label],
   ].map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
   document.querySelector('#shapefileSummary').classList.remove('hidden');
   const rows = shapefileCollection.features.slice(0, 100).map((feature, index) => {
     const stats = shapefileFeatureStats[index];
     const detail = stats
-      ? `${formatArea(stats.area)} · slope ${stats.averageSlope === null ? '—' : `${stats.averageSlope.toFixed(1)}°`} · flood ${stats.highFloodPercent === null ? 'belum dihitung' : `${stats.highFloodPercent.toFixed(1)}%`}`
+      ? shapefileStandalone
+        ? `${formatArea(stats.area)} · perimeter ${stats.perimeter.toLocaleString('id-ID', { maximumFractionDigits: 1 })} m · slope/flood butuh DEM`
+        : `${formatArea(stats.area)} · slope ${stats.averageSlope === null ? '—' : `${stats.averageSlope.toFixed(1)}°`} · flood ${stats.highFloodPercent === null ? 'belum dihitung' : `${stats.highFloodPercent.toFixed(1)}%`}`
       : Object.entries(feature.properties || {}).slice(0, 3).map(([key, value]) => `${key}: ${value}`).join(' · ');
     return `<article><strong>${escapeHtml(shapefileFeatureLabel(feature, index))}</strong><span>${escapeHtml(feature.geometry?.type || '—')}</span><small>${escapeHtml(detail || 'Tanpa atribut')}</small></article>`;
   });
@@ -618,8 +690,8 @@ function refreshShapefileStats() {
 }
 
 async function loadShapefileZip(file) {
-  if (!demValues || !demMeta) throw new Error('Muat DEM/DTM terlebih dahulu agar CRS dan elevasi acuan tersedia.');
   if (!/\.zip$/i.test(file.name)) throw new Error('Pilih satu file ZIP yang berisi .shp, .shx, .dbf, dan .prj.');
+  if (file.size > 250 * 1024 * 1024) throw new Error('ZIP Shapefile terlalu besar untuk diproses aman di browser (maksimum 250 MB).');
   setStatus('Membaca Shapefile', `${file.name} · memvalidasi komponen ZIP dan CRS.`);
   const buffer = await file.arrayBuffer();
   const validation = validateShapefileEntries(listZipEntries(buffer));
@@ -630,30 +702,49 @@ async function loadShapefileZip(file) {
   if (!sampleCoordinate || Math.abs(sampleCoordinate[0]) > 180 || Math.abs(sampleCoordinate[1]) > 90) {
     throw new Error('PRJ tidak dapat ditransformasikan ke WGS84. Tetapkan CRS yang benar atau ekspor ulang Shapefile dari QGIS.');
   }
-  shapefileCollection = transformShapefileToDem(wgs84Collection);
-  const overlapCount = shapefileCollection.features.filter((feature) => geometryOverlapsDem(feature.geometry)).length;
-  if (!overlapCount) {
+  shapefileWgs84Collection = wgs84Collection;
+  shapefileStandalone = !demValues || !demMeta;
+  shapefileCollection = shapefileStandalone ? wgs84Collection : transformShapefileToDem(wgs84Collection);
+  shapefileBounds = shapefileStandalone ? featureCollectionBounds(wgs84Collection) : null;
+  const overlapCount = shapefileStandalone
+    ? shapefileCollection.features.length
+    : shapefileCollection.features.filter((feature) => geometryOverlapsDem(feature.geometry)).length;
+  if (!shapefileStandalone && !overlapCount) {
     shapefileCollection = null;
+    shapefileWgs84Collection = null;
     throw new Error('Tidak ada feature yang beririsan dengan extent DEM. Periksa CRS dan lokasi data Shapefile.');
   }
   shapefileSourceName = file.name;
   shapefileVisible = true;
+  shapefileBackdrop.visible = shapefileStandalone;
+  shapefileGrid.visible = shapefileStandalone;
+  terrain.visible = !shapefileStandalone;
+  base.visible = !shapefileStandalone;
+  if (shapefileStandalone) setViewMode('2d');
   renderShapefileLayer();
   refreshShapefileStats();
   document.querySelector('#shapefileActions').classList.remove('hidden');
   document.querySelector('#shapefileBadge').textContent = 'Aktif';
+  document.querySelector('#toggleShapefile').disabled = false;
   document.querySelector('#toggleShapefile').textContent = 'Sembunyikan layer';
   const warning = validation.incomplete.length ? ` · ${validation.incomplete.length} layer tidak lengkap dilewati` : '';
   const status = document.querySelector('#shapefileStatus');
-  status.textContent = `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${overlapCount} beririsan dengan DEM · ${demMeta.spatial.label}${warning}`;
+  status.textContent = shapefileStandalone
+    ? `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · mode peta datar · ${wgs84Spatial.label}${warning}`
+    : `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${overlapCount} beririsan dengan DEM · ${demMeta.spatial.label}${warning}`;
   status.classList.remove('hidden');
-  setStatus('Shapefile berhasil dimuat', `${shapefileCollection.features.length} feature diselaraskan ke ${demMeta.spatial.label}.`);
+  setStatus('Shapefile berhasil dimuat', shapefileStandalone
+    ? `${shapefileCollection.features.length} feature dirender langsung tanpa orthomosaic atau DEM.`
+    : `${shapefileCollection.features.length} feature diselaraskan ke ${demMeta.spatial.label}.`);
 }
 
 function clearShapefileLayer() {
   shapefileCollection = null;
+  shapefileWgs84Collection = null;
   shapefileFeatureStats = [];
   shapefileSourceName = '';
+  shapefileStandalone = false;
+  shapefileBounds = null;
   for (const child of [...shapefileGroup.children]) {
     shapefileGroup.remove(child);
     disposeObject3d(child);
@@ -663,13 +754,19 @@ function clearShapefileLayer() {
   document.querySelector('#shapefileSummary').classList.add('hidden');
   document.querySelector('#shapefileFeatureList').classList.add('hidden');
   document.querySelector('#shapefileStatus').classList.add('hidden');
-  document.querySelector('#shapefileBadge').textContent = demValues ? 'Siap' : 'Butuh DEM';
+  document.querySelector('#shapefileBadge').textContent = 'Siap';
+  document.querySelector('#toggleShapefile').disabled = false;
+  document.querySelector('#toggleShapefile').textContent = 'Sembunyikan layer';
+  shapefileBackdrop.visible = false;
+  shapefileGrid.visible = false;
+  terrain.visible = true;
+  base.visible = true;
 }
 
 function exportImportedShapefile() {
   if (!shapefileCollection) return;
   const output = { ...shapefileCollection, name: shapefileSourceName.replace(/\.zip$/i, '') };
-  const crs = geoJsonCrs(demMeta.spatial);
+  const crs = geoJsonCrs(shapefileStandalone ? wgs84Spatial : demMeta.spatial);
   if (crs) output.crs = crs;
   downloadText(`${output.name || 'shapefile'}-aligned.geojson`, JSON.stringify(output), 'application/geo+json');
 }
@@ -1622,7 +1719,6 @@ async function loadDemGeoTiff(file) {
   setStatus('Menyiapkan DEM', `${meta.sourceWidth.toLocaleString('id-ID')} × ${meta.sourceHeight.toLocaleString('id-ID')} → grid kerja ${meta.width.toLocaleString('id-ID')} × ${meta.height.toLocaleString('id-ID')}`);
   await nextPaint();
   const rasters = await readRasterPreview(meta, [0], 'height', file.name);
-  if (shapefileCollection) clearShapefileLayer();
   hydrologyWorker?.terminate();
   hydrologyWorker = null;
   hydrologyResult = null;
@@ -1663,9 +1759,42 @@ async function loadDemGeoTiff(file) {
 
   material.displacementMap = null;
   material.displacementScale = 0;
+  terrain.visible = true;
+  base.visible = true;
+  shapefileBackdrop.visible = false;
+  shapefileGrid.visible = false;
   applyDemToGeometry();
   generateAnalysisLayers();
   buildFirstPersonTerrain();
+  if (shapefileWgs84Collection) {
+    const status = document.querySelector('#shapefileStatus');
+    try {
+      const alignedCollection = transformShapefileToDem(shapefileWgs84Collection);
+      shapefileStandalone = false;
+      const overlapCount = alignedCollection.features.filter((feature) => geometryOverlapsDem(feature.geometry)).length;
+      if (!overlapCount) throw new Error('Layer Shapefile tidak beririsan dengan extent DEM baru. Periksa CRS atau lokasi datanya.');
+      shapefileBounds = null;
+      shapefileCollection = alignedCollection;
+      shapefileVisible = true;
+      renderShapefileLayer();
+      refreshShapefileStats();
+      document.querySelector('#toggleShapefile').disabled = false;
+      document.querySelector('#toggleShapefile').textContent = 'Sembunyikan layer';
+      status.textContent = `${shapefileCollection.features.length} feature otomatis diselaraskan ke ${demMeta.spatial.label} · ${overlapCount} beririsan dengan DEM`;
+    } catch (error) {
+      shapefileStandalone = true;
+      shapefileCollection = shapefileWgs84Collection;
+      shapefileBounds = featureCollectionBounds(shapefileWgs84Collection);
+      shapefileVisible = false;
+      renderShapefileLayer();
+      shapefileGroup.visible = false;
+      const toggle = document.querySelector('#toggleShapefile');
+      toggle.disabled = true;
+      toggle.textContent = 'Layer disembunyikan';
+      status.textContent = `${error.message} Data Shapefile tetap tersimpan dan dapat diekspor sebagai WGS84.`;
+    }
+    status.classList.remove('hidden');
+  }
   renderRasterLoadInfo('height', meta, file);
   const crsStatus = document.querySelector('#crsStatus');
   crsStatus.textContent = meta.spatial.assumedMetric
