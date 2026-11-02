@@ -114,16 +114,16 @@
         <p id="noDataStatus" class="quality-notice hidden"></p>
       </section>
 
-      <section id="shapefileSection" class="disabled-section">
+      <section id="shapefileSection">
         <div class="section-heading">
           <h2>Layer kebun</h2>
-          <span id="shapefileBadge">Butuh DEM</span>
+          <span id="shapefileBadge">Siap</span>
         </div>
-        <p class="hint">Upload satu ZIP berisi .shp, .shx, .dbf, dan .prj. Batas blok, jalan, kanal, serta titik aset akan diselaraskan ke CRS DEM.</p>
+        <p class="hint">Upload langsung satu ZIP berisi .shp, .shx, .dbf, dan .prj. Tanpa DEM, layer ditampilkan pada peta datar; DEM dapat ditambahkan kemudian untuk analisis terrain.</p>
         <label class="file-field">
           <span>Import Shapefile ZIP</span>
           <small>Empat file wajib memakai nama dasar yang sama</small>
-          <input id="shapefileInput" type="file" accept=".zip,application/zip" disabled />
+          <input id="shapefileInput" type="file" accept=".zip,application/zip" />
         </label>
         <p id="shapefileStatus" class="quality-notice hidden"></p>
         <div id="shapefileActions" class="button-row hidden">
