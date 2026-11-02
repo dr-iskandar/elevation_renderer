@@ -9,6 +9,19 @@ button, input { font: inherit; }
 body.globe-active #globeMap { display: block; }
 body.globe-active #viewer { visibility: hidden; }
 .globe-status { position: fixed; z-index: 4; right: 25px; bottom: 24px; padding: 9px 12px; border: 1px solid rgba(125,211,252,.28); border-radius: 9px; color: #dbeafe; background: rgba(7,16,24,.82); box-shadow: 0 8px 30px rgba(0,0,0,.3); font-size: 10px; backdrop-filter: blur(12px); }
+.globe-hint { position: fixed; z-index: 4; top: 87px; left: 50%; display: grid; grid-template-columns: auto auto auto; align-items: center; gap: 10px; transform: translateX(-50%); padding: 9px 10px 9px 12px; border: 1px solid rgba(250,204,21,.55); border-radius: 12px; color: #fff; background: rgba(7,16,24,.88); box-shadow: 0 12px 38px rgba(0,0,0,.4); backdrop-filter: blur(14px); }
+.globe-hint > div { display: grid; gap: 2px; }
+.globe-hint strong { color: #fef08a; font-size: 10px; }
+.globe-hint small { color: #cbd5e1; font-size: 9px; font-variant-numeric: tabular-nums; }
+.globe-hint button { border: 1px solid rgba(250,204,21,.5); border-radius: 8px; padding: 7px 9px; color: #171200; background: #facc15; font-size: 9px; font-weight: 800; cursor: pointer; }
+.globe-hint-beacon { width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: #ff2bd6; box-shadow: 0 0 0 0 rgba(255,43,214,.72); animation: location-pulse 1.35s infinite; }
+.estate-location-marker { position: relative; width: 24px; height: 24px; border: 4px solid #fff; border-radius: 50%; background: #ff2bd6; box-shadow: 0 3px 12px rgba(0,0,0,.75); }
+.estate-location-marker::before, .estate-location-marker::after { content: ''; position: absolute; top: 50%; left: 50%; border: 2px solid #facc15; border-radius: 50%; transform: translate(-50%,-50%); }
+.estate-location-marker::before { width: 38px; height: 38px; }
+.estate-location-marker::after { width: 58px; height: 58px; opacity: .85; animation: marker-pulse 1.5s ease-out infinite; }
+@keyframes location-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,43,214,.72); } 70% { box-shadow: 0 0 0 9px rgba(255,43,214,0); } 100% { box-shadow: 0 0 0 0 rgba(255,43,214,0); } }
+@keyframes marker-pulse { 0% { transform: translate(-50%,-50%) scale(.55); opacity: .95; } 100% { transform: translate(-50%,-50%) scale(1.55); opacity: 0; } }
+body:not(.globe-active) .globe-hint { display: none !important; }
 .maplibregl-map { font-family: 'DM Sans', system-ui, sans-serif; }
 .maplibregl-ctrl-bottom-left { left: 345px; }
 .maplibregl-ctrl-attrib { color: #8ea3ad; background: rgba(7,16,24,.72) !important; }
