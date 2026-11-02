@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { fromBlob } from 'geotiff';
-import * as maplibregl from 'maplibre-gl';
+import * as mapboxgl from 'mapbox-gl/esm';
 import proj4 from 'proj4';
 import shp from 'shpjs';
 import { createOdmTask, getOdmTaskInfo, odmAssetUrl, odmStatus } from './odm-client.js';
@@ -15,7 +15,7 @@ import {
   sameSpatialReference,
 } from './spatial-reference.js';
 import { listZipEntries, mapGeometryCoordinates, mergeFeatureCollections, validateShapefileEntries } from './shapefile-utils.js';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import './style.css';
 
 const canvas = document.querySelector('#viewer');
@@ -49,7 +49,6 @@ let viewMode = '3d';
 let globeMap = null;
 let globeMapReady = false;
 let pendingGlobeMode = 'globe-standard';
-let globeLocationMarker = null;
 
 function resetCamera() {
   if (viewMode.startsWith('globe')) {
@@ -609,45 +608,7 @@ function globeLocationData() {
     bounds,
     center: [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2],
     featureCount: shapefileWgs84Collection.features.length,
-    geojson: {
-      type: 'FeatureCollection',
-      features: [{
-        type: 'Feature',
-        properties: { kind: 'upload-bounds' },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [[
-            [bounds.minX, bounds.minY],
-            [bounds.maxX, bounds.minY],
-            [bounds.maxX, bounds.maxY],
-            [bounds.minX, bounds.maxY],
-            [bounds.minX, bounds.minY],
-          ]],
-        },
-      }],
-    },
   };
-}
-
-function updateGlobeLocationHint() {
-  const hint = document.querySelector('#globeHint');
-  const data = globeLocationData();
-  globeLocationMarker?.remove();
-  globeLocationMarker = null;
-  if (!data) {
-    hint.classList.add('hidden');
-    return;
-  }
-  document.querySelector('#globeHintText').textContent = `${data.featureCount.toLocaleString('id-ID')} feature · ${data.center[1].toFixed(5)}, ${data.center[0].toFixed(5)}`;
-  hint.classList.remove('hidden');
-  if (!globeMapReady || !globeMap) return;
-  const markerElement = document.createElement('div');
-  markerElement.className = 'estate-location-marker';
-  markerElement.title = 'Pusat area data yang di-upload';
-  globeLocationMarker = new maplibregl.Marker({ element: markerElement, anchor: 'center' })
-    .setLngLat(data.center)
-    .setPopup(new maplibregl.Popup({ offset: 34 }).setHTML(`<strong>Area data upload</strong><br>${data.featureCount.toLocaleString('id-ID')} feature`))
-    .addTo(globeMap);
 }
 
 function addGlobeMapLayers() {
@@ -657,113 +618,56 @@ function addGlobeMapLayers() {
     data: shapefileWgs84Collection || emptyFeatureCollection(),
     generateId: true,
   });
-  globeMap.addSource('estate-location-bounds', {
-    type: 'geojson',
-    data: globeLocationData()?.geojson || emptyFeatureCollection(),
-  });
-  globeMap.addLayer({
-    id: 'estate-bounds-glow',
-    type: 'line',
-    source: 'estate-location-bounds',
-    paint: {
-      'line-color': '#000000',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 7, 12, 12, 17, 18],
-      'line-opacity': 0.72,
-    },
-  });
-  globeMap.addLayer({
-    id: 'estate-bounds',
-    type: 'line',
-    source: 'estate-location-bounds',
-    paint: {
-      'line-color': '#facc15',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.5, 12, 5, 17, 8],
-      'line-dasharray': [2, 1.25],
-      'line-opacity': 1,
-    },
-  });
-  globeMap.addLayer({
-    id: 'estate-fill',
-    type: 'fill',
-    source: 'estate-shapefile',
-    filter: ['==', ['geometry-type'], 'Polygon'],
-    paint: {
-      'fill-color': '#ff2bd6',
-      'fill-opacity': 0.42,
-      'fill-outline-color': '#facc15',
-    },
-  });
-  globeMap.addLayer({
-    id: 'estate-extrusion',
-    type: 'fill-extrusion',
-    source: 'estate-shapefile',
-    filter: ['==', ['geometry-type'], 'Polygon'],
-    layout: { visibility: 'none' },
-    paint: {
-      'fill-extrusion-color': '#ff2bd6',
-      'fill-extrusion-height': 90,
-      'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.72,
-    },
-  });
   globeMap.addLayer({
     id: 'estate-line-halo',
     type: 'line',
     source: 'estate-shapefile',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#050505',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 5, 12, 10, 17, 16],
-      'line-opacity': 0.86,
+      'line-color': '#000000',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 7, 10, 11, 15, 16],
+      'line-opacity': 0.92,
+      'line-emissive-strength': 1,
+    },
+  });
+  globeMap.addLayer({
+    id: 'estate-line-casing',
+    type: 'line',
+    source: 'estate-shapefile',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': '#facc15',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 4.5, 10, 7.5, 15, 11],
+      'line-opacity': 1,
+      'line-emissive-strength': 1,
     },
   });
   globeMap.addLayer({
     id: 'estate-lines',
     type: 'line',
     source: 'estate-shapefile',
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#facc15',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.5, 12, 5, 17, 8],
+      'line-color': '#ff2bd6',
+      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2, 10, 3.5, 15, 5.5],
       'line-opacity': 1,
+      'line-emissive-strength': 1,
     },
   });
-  globeMap.addLayer({
-    id: 'estate-point-halo',
-    type: 'circle',
-    source: 'estate-shapefile',
-    filter: ['==', ['geometry-type'], 'Point'],
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 10, 12, 15, 17, 20],
-      'circle-color': '#050505',
-      'circle-opacity': 0.86,
-    },
-  });
-  globeMap.addLayer({
-    id: 'estate-points',
-    type: 'circle',
-    source: 'estate-shapefile',
-    filter: ['==', ['geometry-type'], 'Point'],
-    paint: {
-      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 7, 12, 11, 17, 16],
-      'circle-color': '#ff2bd6',
-      'circle-stroke-color': '#facc15',
-      'circle-stroke-width': 3,
-    },
-  });
-  globeMap.moveLayer('estate-bounds-glow');
-  globeMap.moveLayer('estate-bounds');
+  globeMap.moveLayer('estate-line-halo');
+  globeMap.moveLayer('estate-line-casing');
+  globeMap.moveLayer('estate-lines');
 }
 
 function updateGlobeMapData() {
-  updateGlobeLocationHint();
   if (!globeMapReady || !globeMap) return;
   globeMap.getSource('estate-shapefile')?.setData(shapefileWgs84Collection || emptyFeatureCollection());
-  globeMap.getSource('estate-location-bounds')?.setData(globeLocationData()?.geojson || emptyFeatureCollection());
 }
 
 function setGlobeMapLayerVisibility(visible) {
   if (!globeMapReady || !globeMap) return;
   const visibility = visible ? 'visible' : 'none';
-  for (const layer of ['estate-bounds-glow', 'estate-bounds', 'estate-fill', 'estate-extrusion', 'estate-line-halo', 'estate-lines', 'estate-point-halo', 'estate-points']) {
+  for (const layer of ['estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', visibility);
   }
   if (visible) applyGlobeMode(pendingGlobeMode, false);
@@ -794,12 +698,10 @@ function applyGlobeMode(mode, refit = true) {
   pendingGlobeMode = mode;
   if (!globeMapReady || !globeMap) return;
   const mode3d = mode === 'globe-3d';
-  globeMap.setProjection({ type: 'globe' });
+  globeMap.setProjection('globe');
   globeMap.setTerrain(mode3d ? { source: 'terrain-dem', exaggeration: 1.15 } : null);
   if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
-  if (globeMap.getLayer('estate-fill')) globeMap.setLayoutProperty('estate-fill', 'visibility', shapefileVisible && !mode3d ? 'visible' : 'none');
-  if (globeMap.getLayer('estate-extrusion')) globeMap.setLayoutProperty('estate-extrusion', 'visibility', shapefileVisible && mode3d ? 'visible' : 'none');
-  for (const layer of ['estate-bounds-glow', 'estate-bounds', 'estate-line-halo', 'estate-lines', 'estate-point-halo', 'estate-points']) {
+  for (const layer of ['estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
   }
   if (refit) fitGlobeToShapefile(true);
@@ -813,10 +715,25 @@ function ensureGlobeMap(mode) {
     applyGlobeMode(mode, true);
     return;
   }
-  setGlobeStatus('Memuat satellite globe dan terrain…');
-  globeMap = new maplibregl.Map({
+  const accessToken = String(import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || '').trim();
+  if (!accessToken) {
+    setGlobeStatus('Mapbox token belum tersedia. Isi VITE_MAPBOX_ACCESS_TOKEN pada file .env lalu restart npm run dev.', true);
+    return;
+  }
+  setGlobeStatus('Memuat Mapbox satellite globe dan terrain…');
+  globeMap = new mapboxgl.Map({
+    accessToken,
     container: 'globeMap',
-    style: 'https://tiles.openfreemap.org/styles/bright',
+    style: 'mapbox://styles/mapbox/standard-satellite',
+    config: {
+      basemap: {
+        lightPreset: 'day',
+        showPedestrianRoads: false,
+        showPointOfInterestLabels: false,
+        showTransitLabels: false,
+      },
+    },
+    projection: 'globe',
     center: [117, -2],
     zoom: 3,
     pitch: 0,
@@ -824,22 +741,24 @@ function ensureGlobeMap(mode) {
     attributionControl: true,
     canvasContextAttributes: { antialias: true },
   });
-  globeMap.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+  globeMap.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
   globeMap.on('style.load', () => {
     try {
-      globeMap.setProjection({ type: 'globe' });
-      if (!globeMap.getSource('satellite-imagery')) {
-        globeMap.addSource('satellite-imagery', {
-          type: 'raster',
-          tiles: ['https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg'],
-          tileSize: 256,
-          attribution: 'Satellite imagery © EOX Sentinel-2 cloudless',
-        });
-        const firstLabel = globeMap.getStyle().layers.find((layer) => layer.type === 'symbol')?.id;
-        globeMap.addLayer({ id: 'satellite-imagery', type: 'raster', source: 'satellite-imagery' }, firstLabel);
-      }
+      globeMap.setProjection('globe');
+      globeMap.setFog({
+        color: 'rgb(186,210,235)',
+        'high-color': 'rgb(36,92,223)',
+        'horizon-blend': 0.03,
+        'space-color': 'rgb(7,16,24)',
+        'star-intensity': 0.35,
+      });
       if (!globeMap.getSource('terrain-dem')) {
-        globeMap.addSource('terrain-dem', { type: 'raster-dem', url: 'https://tiles.mapterhorn.com/tilejson.json' });
+        globeMap.addSource('terrain-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14,
+        });
         globeMap.addLayer({
           id: 'terrain-hillshade',
           type: 'hillshade',
@@ -3272,7 +3191,6 @@ document.querySelector('#view2d').addEventListener('click', () => setViewMode('2
 document.querySelector('#view3d').addEventListener('click', () => setViewMode('3d'));
 document.querySelector('#globeStandard').addEventListener('click', () => setViewMode('globe-standard'));
 document.querySelector('#globe3d').addEventListener('click', () => setViewMode('globe-3d'));
-document.querySelector('#focusGlobeArea').addEventListener('click', () => fitGlobeToShapefile(true));
 
 document.querySelector('#profileMode').addEventListener('click', (event) => {
   if (measurementMode) clearMeasurement();
