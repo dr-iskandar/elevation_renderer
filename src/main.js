@@ -59,6 +59,8 @@ let globeCanvasOverlay = null;
 let globeCanvasOverlayFrame = 0;
 let globeCanvasOverlayLines = [];
 const mapboxTerrainExaggeration = 1.5;
+let globeLineWidthScale = 1;
+let globeLineColor = '#ffe600';
 
 function resetCamera() {
   if (viewMode.startsWith('globe')) {
@@ -697,15 +699,11 @@ function drawGlobeCanvasOverlay() {
   context.lineCap = 'round';
   context.lineJoin = 'round';
   context.strokeStyle = '#030303';
-  context.lineWidth = 5.5 * densityScale * zoomScale;
+  context.lineWidth = 5.5 * densityScale * zoomScale * globeLineWidthScale;
   context.globalAlpha = 0.88;
   context.stroke(path);
-  context.strokeStyle = '#ffe600';
-  context.lineWidth = 3.2 * densityScale * zoomScale;
-  context.globalAlpha = 0.96;
-  context.stroke(path);
-  context.strokeStyle = '#ff20d6';
-  context.lineWidth = 1.4 * densityScale * zoomScale;
+  context.strokeStyle = globeLineColor;
+  context.lineWidth = 3.2 * densityScale * zoomScale * globeLineWidthScale;
   context.globalAlpha = 1;
   context.stroke(path);
 }
@@ -713,6 +711,28 @@ function drawGlobeCanvasOverlay() {
 function scheduleGlobeCanvasOverlay() {
   if (globeCanvasOverlayFrame) return;
   globeCanvasOverlayFrame = requestAnimationFrame(drawGlobeCanvasOverlay);
+}
+
+function globeLineWidthExpression(low, medium, high) {
+  return ['interpolate', ['linear'], ['zoom'], 3, low * globeLineWidthScale, 10, medium * globeLineWidthScale, 15, high * globeLineWidthScale];
+}
+
+function updateGlobeLineStyle() {
+  const widthInput = document.querySelector('#shapefileLineWidth');
+  const colorInput = document.querySelector('#shapefileLineColor');
+  globeLineWidthScale = THREE.MathUtils.clamp(Number(widthInput.value) || 1, 0.15, 2.5);
+  globeLineColor = /^#[0-9a-f]{6}$/i.test(colorInput.value) ? colorInput.value : '#ffe600';
+  document.querySelector('#shapefileLineWidthValue').textContent = `${globeLineWidthScale.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
+  widthInput.style.accentColor = globeLineColor;
+  if (globeMap) {
+    if (globeMap.getLayer('estate-line-halo')) globeMap.setPaintProperty('estate-line-halo', 'line-width', globeLineWidthExpression(3, 4.5, 6));
+    for (const layer of ['estate-line-casing', 'estate-lines']) {
+      if (globeMap.getLayer(layer)) globeMap.setPaintProperty(layer, 'line-color', globeLineColor);
+    }
+    if (globeMap.getLayer('estate-line-casing')) globeMap.setPaintProperty('estate-line-casing', 'line-width', globeLineWidthExpression(1.8, 2.7, 3.5));
+    if (globeMap.getLayer('estate-lines')) globeMap.setPaintProperty('estate-lines', 'line-width', globeLineWidthExpression(0.8, 1.2, 1.8));
+  }
+  scheduleGlobeCanvasOverlay();
 }
 
 function addGlobeMapLayers() {
@@ -753,7 +773,7 @@ function addGlobeMapLayers() {
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': '#050505',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 10, 4.5, 15, 6],
+        'line-width': globeLineWidthExpression(3, 4.5, 6),
         'line-opacity': 0.86,
       },
     },
@@ -764,8 +784,8 @@ function addGlobeMapLayers() {
       slot: 'top',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#ffe600',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 1.8, 10, 2.7, 15, 3.5],
+        'line-color': globeLineColor,
+        'line-width': globeLineWidthExpression(1.8, 2.7, 3.5),
         'line-opacity': 0.94,
       },
     },
@@ -776,8 +796,8 @@ function addGlobeMapLayers() {
       slot: 'top',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#ff20d6',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.8, 10, 1.2, 15, 1.8],
+        'line-color': globeLineColor,
+        'line-width': globeLineWidthExpression(0.8, 1.2, 1.8),
         'line-opacity': 1,
       },
     },
@@ -1271,6 +1291,8 @@ async function loadShapefileZip(file) {
   setViewMode('globe-standard');
   refreshShapefileStats();
   document.querySelector('#shapefileActions').classList.remove('hidden');
+  document.querySelector('#shapefileStyleControls').classList.remove('hidden');
+  updateGlobeLineStyle();
   document.querySelector('#shapefileBadge').textContent = 'Aktif';
   document.querySelector('#toggleShapefile').disabled = false;
   document.querySelector('#toggleShapefile').textContent = 'Sembunyikan layer';
@@ -1303,6 +1325,7 @@ function clearShapefileLayer() {
   }
   document.querySelector('#shapefileInput').value = '';
   document.querySelector('#shapefileActions').classList.add('hidden');
+  document.querySelector('#shapefileStyleControls').classList.add('hidden');
   document.querySelector('#shapefileSummary').classList.add('hidden');
   document.querySelector('#shapefileFeatureList').classList.add('hidden');
   document.querySelector('#shapefileStatus').classList.add('hidden');
@@ -3318,6 +3341,9 @@ document.querySelector('#toggleShapefile').addEventListener('click', (event) => 
 });
 document.querySelector('#clearShapefile').addEventListener('click', clearShapefileLayer);
 document.querySelector('#exportShapefile').addEventListener('click', exportImportedShapefile);
+document.querySelector('#shapefileLineWidth').addEventListener('input', updateGlobeLineStyle);
+document.querySelector('#shapefileLineColor').addEventListener('input', updateGlobeLineStyle);
+updateGlobeLineStyle();
 
 document.querySelectorAll('.layer-button').forEach((button) => {
   button.addEventListener('click', () => selectLayer(button.dataset.layer));
