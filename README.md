@@ -2,7 +2,7 @@
 
 Viewer lokal untuk merender GeoTIFF/heightmap DEM sebagai terrain 3D dan menampilkan GeoTIFF RGB, orthophoto, citra satelit, atau peta sebagai texture di permukaannya.
 
-## Fokus v2.4.1
+## Fokus v2.5.0
 
 Versi ini memprioritaskan dua workflow produk:
 
@@ -12,8 +12,8 @@ Versi ini memprioritaskan dua workflow produk:
 4. **Shapefile operasional:** satu ZIP berisi `.shp`, `.shx`, `.dbf`, dan `.prj` dapat dimuat sebagai batas blok, jalan, kanal, atau titik aset dan diselaraskan ke CRS DEM.
 5. **Shapefile standalone:** paket Shapefile dapat dibuka lebih dahulu pada peta datar tanpa orthomosaic, DEM, atau DTM. Saat DEM dimuat kemudian, layer otomatis diproyeksikan dan didrape ke terrain.
 6. **Globe WGS84:** Shapefile otomatis ditempatkan pada posisi longitude/latitude sebenarnya. Mode Globe menampilkan layer di permukaan bumi, sedangkan Globe 3D memberi extrusi visual pada polygon untuk inspeksi tanpa mengklaimnya sebagai elevasi terrain.
-7. **Realistic globe basemap:** mode Globe menggunakan MapLibre GL dengan satellite imagery, label peta, atmosphere, dan auto-fit ke extent Shapefile. Globe 3D menambahkan terrain elevation serta kamera pitch untuk inspeksi regional.
-8. **High-visibility location hint:** layer upload memakai fill magenta, outline kuning, halo gelap, bounding box, dan beacon berdenyut. Panel lokasi menyediakan koordinat pusat serta tombol untuk mengembalikan kamera ke area data.
+7. **Mapbox satellite globe:** mode Globe menggunakan Mapbox Standard Satellite, atmosphere, dan auto-focus ke extent Shapefile. Globe 3D menambahkan Mapbox Terrain-DEM serta kamera pitch untuk inspeksi regional.
+8. **High-visibility boundary:** geometry upload digambar sebagai tiga lapis garis di atas basemap—halo hitam, casing kuning, dan garis inti magenta—tanpa marker POI yang menutupi lokasi.
 
 ## Menjalankan NodeODM
 
@@ -45,6 +45,22 @@ Pastikan Node.js 20 atau yang lebih baru sudah terpasang.
 
 ```bash
 npm install
+npm run dev
+```
+
+Untuk mode Globe, salin konfigurasi environment lalu isi public token Mapbox (`pk.`):
+
+```bash
+cp .env.example .env
+```
+
+```env
+VITE_MAPBOX_ACCESS_TOKEN=pk.your_public_mapbox_token
+```
+
+Setelah mengubah `.env`, restart development server:
+
+```bash
 npm run dev
 ```
 
@@ -144,7 +160,7 @@ Viewer akan:
 
 Tanpa DEM, viewer memakai mode standalone WGS84 dan tetap menghitung luas serta perimeter polygon. Elevasi, rata-rata slope, dan persentase Flood Risk ditampilkan setelah DEM/DTM yang beririsan dimuat. Orthomosaic hanya diperlukan bila pengguna ingin melihat texture foto asli.
 
-Setelah ZIP selesai dibaca, viewer otomatis membuka **Globe Standard** dan melakukan `fitBounds` ke extent layer, sehingga batas afdeling langsung memenuhi viewport dan tidak menjadi titik kecil pada tampilan seluruh bumi. Gunakan **Globe 3D** untuk satellite terrain dengan kamera perspektif. Mode globe memerlukan koneksi internet untuk mengambil basemap dan terrain tile; Shapefile tetap diproses lokal di browser.
+Setelah ZIP selesai dibaca, viewer otomatis membuka **Globe Standard** dan memusatkan kamera ke extent layer. Boundary digambar di atas Mapbox Standard Satellite menggunakan halo hitam, casing kuning, dan garis inti magenta. Gunakan **Globe 3D** untuk Mapbox Terrain-DEM dengan kamera perspektif. Mode globe memerlukan koneksi internet dan public Mapbox access token; Shapefile tetap diproses lokal di browser.
 
 Layer projected di luar keluarga WGS84 UTM harus mempunyai definisi Proj4 yang tersedia atau dikonversi terlebih dahulu di QGIS. File `.prj` diwajibkan agar koordinat tidak diterka.
 
