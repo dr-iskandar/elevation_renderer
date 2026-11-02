@@ -2,7 +2,7 @@
 
 Viewer lokal untuk merender GeoTIFF/heightmap DEM sebagai terrain 3D dan menampilkan GeoTIFF RGB, orthophoto, citra satelit, atau peta sebagai texture di permukaannya.
 
-## Fokus v2.1.0
+## Fokus v2.2.0
 
 Versi ini memprioritaskan dua workflow produk:
 
@@ -10,6 +10,7 @@ Versi ini memprioritaskan dua workflow produk:
 2. **Terrain-based Flood Risk:** DTM dibersihkan dari NoData, dihitung dengan Priority-Flood dan D8 flow accumulation, lalu diklasifikasikan menjadi Low, Medium, High, dan Critical.
 3. **CRS geografis dan UTM:** metadata EPSG/GeoKeys dibaca otomatis sehingga slope, luas, panjang, hydrology, elevation profile, dan FPV memakai skala meter yang benar.
 4. **Shapefile operasional:** satu ZIP berisi `.shp`, `.shx`, `.dbf`, dan `.prj` dapat dimuat sebagai batas blok, jalan, kanal, atau titik aset dan diselaraskan ke CRS DEM.
+5. **Shapefile standalone:** paket Shapefile dapat dibuka lebih dahulu pada peta datar tanpa orthomosaic, DEM, atau DTM. Saat DEM dimuat kemudian, layer otomatis diproyeksikan dan didrape ke terrain.
 
 ## Menjalankan NodeODM
 
@@ -118,7 +119,7 @@ Layer analisis dihitung lokal di browser; GeoTIFF tidak dikirim ke server.
 
 ## Import Shapefile ZIP
 
-Muat DEM/DTM terlebih dahulu, kemudian upload satu ZIP standar dengan komponen bernama sama:
+Upload langsung satu ZIP standar dengan komponen bernama sama. DEM/DTM dan orthomosaic bersifat opsional:
 
 ```text
 batas_blok.shp
@@ -137,6 +138,8 @@ Viewer akan:
 - menggambar polygon, line, dan point mengikuti permukaan terrain;
 - menghitung area, perimeter, elevasi, rata-rata slope, serta persentase High/Critical Flood Risk per polygon;
 - mengekspor geometry yang sudah sejajar sebagai GeoJSON beserta CRS target.
+
+Tanpa DEM, viewer memakai mode standalone WGS84 dan tetap menghitung luas serta perimeter polygon. Elevasi, rata-rata slope, dan persentase Flood Risk ditampilkan setelah DEM/DTM yang beririsan dimuat. Orthomosaic hanya diperlukan bila pengguna ingin melihat texture foto asli.
 
 Layer projected di luar keluarga WGS84 UTM harus mempunyai definisi Proj4 yang tersedia atau dikonversi terlebih dahulu di QGIS. File `.prj` diwajibkan agar koordinat tidak diterka.
 
