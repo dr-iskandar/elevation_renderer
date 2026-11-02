@@ -16,8 +16,10 @@
       </div>
       <div class="top-actions">
         <div class="view-switch" aria-label="Mode tampilan">
-          <button id="view3d" class="active" type="button">3D</button>
-          <button id="view2d" type="button">2D</button>
+          <button id="view3d" class="active" type="button">Map 3D</button>
+          <button id="view2d" type="button">Map 2D</button>
+          <button id="globeStandard" type="button">Globe</button>
+          <button id="globe3d" type="button">Globe 3D</button>
         </div>
         <button id="resetCamera" class="ghost-button" type="button">Reset camera</button>
       </div>
@@ -119,7 +121,7 @@
           <h2>Layer kebun</h2>
           <span id="shapefileBadge">Siap</span>
         </div>
-        <p class="hint">Upload langsung satu ZIP berisi .shp, .shx, .dbf, dan .prj. Tanpa DEM, layer ditampilkan pada peta datar; DEM dapat ditambahkan kemudian untuk analisis terrain.</p>
+        <p class="hint">Upload langsung satu ZIP berisi .shp, .shx, .dbf, dan .prj. Layer otomatis ditempatkan pada Globe WGS84; Map 2D/3D dan DEM tetap dapat dipakai sebagai mode alternatif.</p>
         <label class="file-field">
           <span>Import Shapefile ZIP</span>
           <small>Empat file wajib memakai nama dasar yang sama</small>
