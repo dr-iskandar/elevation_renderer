@@ -2,7 +2,7 @@
 
 Viewer lokal untuk merender GeoTIFF/heightmap DEM sebagai terrain 3D dan menampilkan GeoTIFF RGB, orthophoto, citra satelit, atau peta sebagai texture di permukaannya.
 
-## Fokus v2.2.0
+## Fokus v2.3.0
 
 Versi ini memprioritaskan dua workflow produk:
 
@@ -11,6 +11,7 @@ Versi ini memprioritaskan dua workflow produk:
 3. **CRS geografis dan UTM:** metadata EPSG/GeoKeys dibaca otomatis sehingga slope, luas, panjang, hydrology, elevation profile, dan FPV memakai skala meter yang benar.
 4. **Shapefile operasional:** satu ZIP berisi `.shp`, `.shx`, `.dbf`, dan `.prj` dapat dimuat sebagai batas blok, jalan, kanal, atau titik aset dan diselaraskan ke CRS DEM.
 5. **Shapefile standalone:** paket Shapefile dapat dibuka lebih dahulu pada peta datar tanpa orthomosaic, DEM, atau DTM. Saat DEM dimuat kemudian, layer otomatis diproyeksikan dan didrape ke terrain.
+6. **Globe WGS84:** Shapefile otomatis ditempatkan pada posisi longitude/latitude sebenarnya. Mode Globe menampilkan layer di permukaan bumi, sedangkan Globe 3D memberi extrusi visual pada polygon untuk inspeksi tanpa mengklaimnya sebagai elevasi terrain.
 
 ## Menjalankan NodeODM
 
@@ -140,6 +141,8 @@ Viewer akan:
 - mengekspor geometry yang sudah sejajar sebagai GeoJSON beserta CRS target.
 
 Tanpa DEM, viewer memakai mode standalone WGS84 dan tetap menghitung luas serta perimeter polygon. Elevasi, rata-rata slope, dan persentase Flood Risk ditampilkan setelah DEM/DTM yang beririsan dimuat. Orthomosaic hanya diperlukan bila pengguna ingin melihat texture foto asli.
+
+Setelah ZIP selesai dibaca, viewer otomatis membuka **Globe Standard** dan memusatkan kamera ke lokasi layer. Gunakan **Globe 3D** untuk membuat batas polygon menonjol dari permukaan sebagai bantuan visual. Extrusi ini bukan ketinggian sebenarnya; elevasi riil hanya tersedia dari DEM/DTM atau geometry Z yang tervalidasi.
 
 Layer projected di luar keluarga WGS84 UTM harus mempunyai definisi Proj4 yang tersedia atau dikonversi terlebih dahulu di QGIS. File `.prj` diwajibkan agar koordinat tidak diterka.
 
