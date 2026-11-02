@@ -118,6 +118,10 @@ body.globe-active #viewer { visibility: hidden; }
 .range-field span, .toggle-field { display: flex; justify-content: space-between; align-items: center; color: #cad7dc; font-size: 12px; }
 .range-field output { color: #6ee7b7; font-variant-numeric: tabular-nums; }
 input[type='range'] { width: 100%; margin: 9px 0 0; accent-color: #46d7a1; }
+.shapefile-style-controls { margin-top: 11px; padding: 10px; border: 1px solid rgba(110,231,183,.16); border-radius: 10px; background: rgba(110,231,183,.045); }
+.shapefile-style-controls .range-field { margin-top: 0; }
+.color-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; color: #cad7dc; font-size: 11px; }
+.color-field input[type='color'] { width: 44px; height: 28px; padding: 2px; border: 1px solid rgba(255,255,255,.16); border-radius: 7px; background: rgba(255,255,255,.05); cursor: pointer; }
 .toggle-field { margin-top: 14px; }
 .toggle-field input { width: 17px; height: 17px; accent-color: #46d7a1; }
 .status-card { display: flex; gap: 10px; align-items: flex-start; }
