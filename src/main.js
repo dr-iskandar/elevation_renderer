@@ -55,6 +55,9 @@ let viewMode = '3d';
 let globeMap = null;
 let globeMapReady = false;
 let pendingGlobeMode = 'globe-standard';
+let globeCanvasOverlay = null;
+let globeCanvasOverlayFrame = 0;
+let globeCanvasOverlayLines = [];
 
 function resetCamera() {
   if (viewMode.startsWith('globe')) {
@@ -617,21 +620,95 @@ function globeLocationData() {
   };
 }
 
-function ensureGlobeBoundaryStripeImage() {
-  const imageId = 'estate-boundary-stripe';
-  if (!globeMap || globeMap.hasImage(imageId)) return imageId;
-  const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 16;
-  const context = canvas.getContext('2d');
-  context.fillStyle = '#050505';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = '#ffe600';
-  context.fillRect(0, 3, canvas.width, 10);
-  context.fillStyle = '#ff20d6';
-  context.fillRect(0, 6, canvas.width, 4);
-  globeMap.addImage(imageId, context.getImageData(0, 0, canvas.width, canvas.height), { pixelRatio: 2 });
-  return imageId;
+function refreshGlobeCanvasOverlayData() {
+  globeCanvasOverlayLines = featureCollectionToBoundaryLines(shapefileWgs84Collection || emptyFeatureCollection())
+    .features
+    .map((feature) => feature.geometry.coordinates)
+    .filter((coordinates) => coordinates.length >= 2);
+  scheduleGlobeCanvasOverlay();
+}
+
+function ensureGlobeCanvasOverlay() {
+  if (!globeMap || globeCanvasOverlay) return;
+  globeCanvasOverlay = document.createElement('canvas');
+  globeCanvasOverlay.id = 'globeBoundaryOverlay';
+  globeCanvasOverlay.setAttribute('aria-hidden', 'true');
+  Object.assign(globeCanvasOverlay.style, {
+    position: 'absolute',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    zIndex: '1',
+    pointerEvents: 'none',
+  });
+  globeMap.getCanvasContainer().appendChild(globeCanvasOverlay);
+}
+
+function drawGlobeCanvasOverlay() {
+  globeCanvasOverlayFrame = 0;
+  if (!globeMap || !globeCanvasOverlay) return;
+  const mapCanvas = globeMap.getCanvas();
+  const width = mapCanvas.clientWidth;
+  const height = mapCanvas.clientHeight;
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const renderWidth = Math.max(1, Math.round(width * pixelRatio));
+  const renderHeight = Math.max(1, Math.round(height * pixelRatio));
+  if (globeCanvasOverlay.width !== renderWidth || globeCanvasOverlay.height !== renderHeight) {
+    globeCanvasOverlay.width = renderWidth;
+    globeCanvasOverlay.height = renderHeight;
+  }
+  const context = globeCanvasOverlay.getContext('2d');
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (!shapefileVisible || !viewMode.startsWith('globe') || !globeCanvasOverlayLines.length) return;
+
+  const totalVertices = globeCanvasOverlayLines.reduce((sum, line) => sum + line.length, 0);
+  const stride = Math.max(1, Math.ceil(totalVertices / 180000));
+  const maximumJump = Math.max(width, height) * 1.35;
+  const path = new Path2D();
+  const appendCoordinate = (coordinate, state) => {
+    const longitude = Number(coordinate?.[0]);
+    const latitude = Number(coordinate?.[1]);
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+      state.previous = null;
+      return;
+    }
+    const point = globeMap.project([longitude, latitude]);
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      state.previous = null;
+      return;
+    }
+    const jump = state.previous ? Math.hypot(point.x - state.previous.x, point.y - state.previous.y) : Infinity;
+    if (!state.previous || jump > maximumJump) path.moveTo(point.x, point.y);
+    else path.lineTo(point.x, point.y);
+    state.previous = point;
+  };
+  for (const line of globeCanvasOverlayLines) {
+    const state = { previous: null };
+    for (let index = 0; index < line.length; index += stride) appendCoordinate(line[index], state);
+    if ((line.length - 1) % stride !== 0) appendCoordinate(line.at(-1), state);
+  }
+
+  const zoom = globeMap.getZoom();
+  const scale = Math.max(0, Math.min(1, (zoom - 4) / 10));
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.strokeStyle = '#030303';
+  context.lineWidth = 11 + scale * 8;
+  context.globalAlpha = 0.98;
+  context.stroke(path);
+  context.strokeStyle = '#ffe600';
+  context.lineWidth = 7 + scale * 6;
+  context.globalAlpha = 1;
+  context.stroke(path);
+  context.strokeStyle = '#ff20d6';
+  context.lineWidth = 3 + scale * 4;
+  context.stroke(path);
+}
+
+function scheduleGlobeCanvasOverlay() {
+  if (globeCanvasOverlayFrame) return;
+  globeCanvasOverlayFrame = requestAnimationFrame(drawGlobeCanvasOverlay);
 }
 
 function addGlobeMapLayers() {
@@ -651,8 +728,6 @@ function addGlobeMapLayers() {
       generateId: true,
     });
   }
-  const stripeImage = ensureGlobeBoundaryStripeImage();
-
   const polygonFilter = ['==', ['geometry-type'], 'Polygon'];
   const layers = [
     {
@@ -702,23 +777,6 @@ function addGlobeMapLayers() {
         'line-opacity': 1,
       },
     },
-    {
-      id: 'estate-lines-symbol-overlay',
-      type: 'symbol',
-      source: 'estate-boundary-lines',
-      slot: 'top',
-      layout: {
-        'symbol-placement': 'line',
-        'symbol-spacing': 8,
-        'icon-image': stripeImage,
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 10, 1.15, 15, 1.45],
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-        'icon-rotation-alignment': 'map',
-        'icon-pitch-alignment': 'map',
-        'icon-keep-upright': false,
-      },
-    },
   ];
 
   for (const layer of layers) if (!globeMap.getLayer(layer.id)) globeMap.addLayer(layer);
@@ -728,6 +786,7 @@ function addGlobeMapLayers() {
 }
 
 function updateGlobeMapData() {
+  refreshGlobeCanvasOverlayData();
   if (!globeMapReady || !globeMap) return;
   globeMap.getSource('estate-shapefile')?.setData(shapefileWgs84Collection || emptyFeatureCollection());
   globeMap.getSource('estate-boundary-lines')?.setData(featureCollectionToBoundaryLines(shapefileWgs84Collection || emptyFeatureCollection()));
@@ -736,9 +795,10 @@ function updateGlobeMapData() {
 function setGlobeMapLayerVisibility(visible) {
   if (!globeMapReady || !globeMap) return;
   const visibility = visible ? 'visible' : 'none';
-  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines', 'estate-lines-symbol-overlay']) {
+  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', visibility);
   }
+  scheduleGlobeCanvasOverlay();
   if (visible) applyGlobeMode(pendingGlobeMode, false);
 }
 
@@ -776,11 +836,12 @@ function applyGlobeMode(mode, refit = true) {
   globeMap.setProjection('globe');
   globeMap.setTerrain(mode3d ? { source: 'terrain-dem', exaggeration: 1.15 } : null);
   if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
-  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines', 'estate-lines-symbol-overlay']) {
+  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
   }
   if (refit) fitGlobeToShapefile(true);
   else globeMap.easeTo({ pitch: mode3d ? 58 : 0, bearing: mode3d ? -22 : 0, duration: 450 });
+  scheduleGlobeCanvasOverlay();
 }
 
 function ensureGlobeMap(mode) {
@@ -817,7 +878,12 @@ function ensureGlobeMap(mode) {
     canvasContextAttributes: { antialias: true },
   });
   globeMap.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right');
+  ensureGlobeCanvasOverlay();
+  refreshGlobeCanvasOverlayData();
+  globeMap.on('render', scheduleGlobeCanvasOverlay);
+  globeMap.on('resize', scheduleGlobeCanvasOverlay);
   globeMap.on('style.load', () => {
+    globeMapReady = true;
     try {
       globeMap.setProjection('globe');
       globeMap.setFog({
@@ -827,6 +893,10 @@ function ensureGlobeMap(mode) {
         'space-color': 'rgb(7,16,24)',
         'star-intensity': 0.35,
       });
+    } catch (error) {
+      console.warn('Konfigurasi projection/fog Mapbox dilewati:', error);
+    }
+    try {
       if (!globeMap.getSource('terrain-dem')) {
         globeMap.addSource('terrain-dem', {
           type: 'raster-dem',
@@ -842,25 +912,19 @@ function ensureGlobeMap(mode) {
           paint: { 'hillshade-shadow-color': '#172554', 'hillshade-exaggeration': 0.22 },
         });
       }
-      addGlobeMapLayers();
-      globeMapReady = true;
-      updateGlobeMapData();
-      applyGlobeMode(pendingGlobeMode, true);
-      setGlobeStatus();
-      globeMap.once('idle', () => {
-        try {
-          addGlobeMapLayers();
-          updateGlobeMapData();
-          applyGlobeMode(pendingGlobeMode, true);
-        } catch (error) {
-          console.error('Gagal memasang ulang overlay Shapefile:', error);
-          setGlobeStatus(`Boundary gagal dirender: ${error.message}`, true);
-        }
-      });
     } catch (error) {
-      console.error(error);
-      setGlobeStatus(`Globe gagal disiapkan: ${error.message}`, true);
+      console.warn('Terrain Mapbox tidak dapat disiapkan:', error);
     }
+    try {
+      addGlobeMapLayers();
+    } catch (error) {
+      console.warn('Native Mapbox line layer gagal; canvas overlay tetap aktif:', error);
+    }
+    updateGlobeMapData();
+    applyGlobeMode(pendingGlobeMode, true);
+    scheduleGlobeCanvasOverlay();
+    setGlobeStatus();
+    globeMap.once('idle', scheduleGlobeCanvasOverlay);
   });
   globeMap.on('error', (event) => {
     if (!globeMapReady && event?.error) setGlobeStatus(`Basemap gagal dimuat: ${event.error.message}`, true);
@@ -1208,8 +1272,8 @@ async function loadShapefileZip(file) {
   const globeLineCount = featureCollectionToBoundaryLines(shapefileWgs84Collection).features.length;
   const status = document.querySelector('#shapefileStatus');
   status.textContent = shapefileStandalone
-    ? `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${globeLineCount} garis Globe · ${wgs84Spatial.label}${warning}`
-    : `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${globeLineCount} garis Globe · ${overlapCount} beririsan dengan DEM · ${demMeta.spatial.label}${warning}`;
+    ? `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${globeLineCount} garis Globe · overlay canvas aktif · ${wgs84Spatial.label}${warning}`
+    : `${validation.complete.length} layer · ${shapefileCollection.features.length} feature · ${globeLineCount} garis Globe · overlay canvas aktif · ${overlapCount} beririsan dengan DEM · ${demMeta.spatial.label}${warning}`;
   status.classList.remove('hidden');
   setStatus('Shapefile berhasil dimuat', shapefileStandalone
     ? `${shapefileCollection.features.length} feature dirender langsung tanpa orthomosaic atau DEM.`
