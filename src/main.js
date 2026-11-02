@@ -612,51 +612,73 @@ function globeLocationData() {
 }
 
 function addGlobeMapLayers() {
-  if (!globeMap || globeMap.getSource('estate-shapefile')) return;
-  globeMap.addSource('estate-shapefile', {
-    type: 'geojson',
-    data: shapefileWgs84Collection || emptyFeatureCollection(),
-    generateId: true,
-  });
-  globeMap.addLayer({
-    id: 'estate-line-halo',
-    type: 'line',
-    source: 'estate-shapefile',
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': '#000000',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 7, 10, 11, 15, 16],
-      'line-opacity': 0.92,
-      'line-emissive-strength': 1,
+  if (!globeMap?.isStyleLoaded()) return false;
+  if (!globeMap.getSource('estate-shapefile')) {
+    globeMap.addSource('estate-shapefile', {
+      type: 'geojson',
+      data: shapefileWgs84Collection || emptyFeatureCollection(),
+      generateId: true,
+    });
+  }
+
+  const boundaryFilter = ['match', ['geometry-type'], ['LineString', 'Polygon'], true, false];
+  const polygonFilter = ['==', ['geometry-type'], 'Polygon'];
+  const layers = [
+    {
+      id: 'estate-area-highlight',
+      type: 'fill',
+      source: 'estate-shapefile',
+      slot: 'top',
+      filter: polygonFilter,
+      paint: {
+        'fill-color': '#ff2bd6',
+        'fill-opacity': 0.10,
+      },
     },
-  });
-  globeMap.addLayer({
-    id: 'estate-line-casing',
-    type: 'line',
-    source: 'estate-shapefile',
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': '#facc15',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 4.5, 10, 7.5, 15, 11],
-      'line-opacity': 1,
-      'line-emissive-strength': 1,
+    {
+      id: 'estate-line-halo',
+      type: 'line',
+      source: 'estate-shapefile',
+      slot: 'top',
+      filter: boundaryFilter,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#050505',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 10, 10, 15, 15, 21],
+        'line-opacity': 0.96,
+      },
     },
-  });
-  globeMap.addLayer({
-    id: 'estate-lines',
-    type: 'line',
-    source: 'estate-shapefile',
-    layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: {
-      'line-color': '#ff2bd6',
-      'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2, 10, 3.5, 15, 5.5],
-      'line-opacity': 1,
-      'line-emissive-strength': 1,
+    {
+      id: 'estate-line-casing',
+      type: 'line',
+      source: 'estate-shapefile',
+      slot: 'top',
+      filter: boundaryFilter,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#ffe600',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 7, 10, 11, 15, 16],
+        'line-opacity': 1,
+      },
     },
-  });
-  globeMap.moveLayer('estate-line-halo');
-  globeMap.moveLayer('estate-line-casing');
-  globeMap.moveLayer('estate-lines');
+    {
+      id: 'estate-lines',
+      type: 'line',
+      source: 'estate-shapefile',
+      slot: 'top',
+      filter: boundaryFilter,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#ff20d6',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 3, 10, 5, 15, 8],
+        'line-opacity': 1,
+      },
+    },
+  ];
+
+  for (const layer of layers) if (!globeMap.getLayer(layer.id)) globeMap.addLayer(layer);
+  globeMap.getSource('estate-shapefile')?.setData(shapefileWgs84Collection || emptyFeatureCollection());
+  return layers.every((layer) => Boolean(globeMap.getLayer(layer.id)));
 }
 
 function updateGlobeMapData() {
@@ -667,7 +689,7 @@ function updateGlobeMapData() {
 function setGlobeMapLayerVisibility(visible) {
   if (!globeMapReady || !globeMap) return;
   const visibility = visible ? 'visible' : 'none';
-  for (const layer of ['estate-line-halo', 'estate-line-casing', 'estate-lines']) {
+  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', visibility);
   }
   if (visible) applyGlobeMode(pendingGlobeMode, false);
@@ -676,18 +698,24 @@ function setGlobeMapLayerVisibility(visible) {
 function fitGlobeToShapefile(animated = true) {
   if (!globeMapReady || !globeMap || !shapefileWgs84Collection?.features?.length) return;
   const { bounds, center } = globeLocationData();
-  const width = bounds.maxX - bounds.minX;
-  const height = bounds.maxY - bounds.minY;
-  const longitudeSpan = Math.max(0.0015, width * Math.max(0.2, Math.cos(THREE.MathUtils.degToRad(center[1]))));
-  const latitudeSpan = Math.max(0.0015, height);
-  const angularSpan = Math.max(longitudeSpan, latitudeSpan);
-  const calculatedZoom = Math.log2(360 / angularSpan) - 1.7;
-  const targetZoom = THREE.MathUtils.clamp(calculatedZoom, 9.5, pendingGlobeMode === 'globe-3d' ? 14.5 : 15.5);
   const mode3d = pendingGlobeMode === 'globe-3d';
-  globeMap.easeTo({
-    center,
-    zoom: targetZoom,
+  const hasArea = Math.abs(bounds.maxX - bounds.minX) > 1e-7 || Math.abs(bounds.maxY - bounds.minY) > 1e-7;
+  if (!hasArea) {
+    globeMap.easeTo({
+      center,
+      zoom: mode3d ? 14 : 15,
+      pitch: mode3d ? 58 : 0,
+      bearing: mode3d ? -22 : 0,
+      duration: animated ? 1100 : 0,
+    });
+    return;
+  }
+  globeMap.fitBounds([
+    [bounds.minX, bounds.minY],
+    [bounds.maxX, bounds.maxY],
+  ], {
     padding: { top: 120, right: 90, bottom: 80, left: innerWidth > 760 ? 370 : 70 },
+    maxZoom: mode3d ? 14.5 : 15.5,
     pitch: mode3d ? 58 : 0,
     bearing: mode3d ? -22 : 0,
     duration: animated ? 1100 : 0,
@@ -701,7 +729,7 @@ function applyGlobeMode(mode, refit = true) {
   globeMap.setProjection('globe');
   globeMap.setTerrain(mode3d ? { source: 'terrain-dem', exaggeration: 1.15 } : null);
   if (globeMap.getLayer('terrain-hillshade')) globeMap.setLayoutProperty('terrain-hillshade', 'visibility', mode3d ? 'visible' : 'none');
-  for (const layer of ['estate-line-halo', 'estate-line-casing', 'estate-lines']) {
+  for (const layer of ['estate-area-highlight', 'estate-line-halo', 'estate-line-casing', 'estate-lines']) {
     if (globeMap.getLayer(layer)) globeMap.setLayoutProperty(layer, 'visibility', shapefileVisible ? 'visible' : 'none');
   }
   if (refit) fitGlobeToShapefile(true);
@@ -772,6 +800,16 @@ function ensureGlobeMap(mode) {
       updateGlobeMapData();
       applyGlobeMode(pendingGlobeMode, true);
       setGlobeStatus();
+      globeMap.once('idle', () => {
+        try {
+          addGlobeMapLayers();
+          updateGlobeMapData();
+          applyGlobeMode(pendingGlobeMode, true);
+        } catch (error) {
+          console.error('Gagal memasang ulang overlay Shapefile:', error);
+          setGlobeStatus(`Boundary gagal dirender: ${error.message}`, true);
+        }
+      });
     } catch (error) {
       console.error(error);
       setGlobeStatus(`Globe gagal disiapkan: ${error.message}`, true);
